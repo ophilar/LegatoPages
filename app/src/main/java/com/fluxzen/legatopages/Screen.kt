@@ -175,6 +175,7 @@ fun PdfViewer(
 
     val remotePage by remotePageRequest?.collectAsState() ?: remember { mutableStateOf(null) }
     val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     LaunchedEffect(vueReaderState.currentPage) {
         onPageChanged(vueReaderState.currentPage - 1)
@@ -205,20 +206,28 @@ fun PdfViewer(
         }
     }
 
-    val context = LocalContext.current
     Column(modifier = modifier.fillMaxSize()) {
         BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
             val configuration = LocalConfiguration.current
-            // Keying with vueReaderState ensures this effect reruns if the PDF URI changes (new state instance)
-            // or if the orientation changes.
-            LaunchedEffect(key1 = vueReaderState, key2 = configuration.orientation) {
-                vueReaderState.load(
-                    context = context,
-                    coroutineScope = coroutineScope,
-                    containerSize = IntSize(constraints.maxWidth, constraints.maxHeight),
-                    isPortrait = configuration.orientation == Configuration.ORIENTATION_PORTRAIT,
-                    customResource = null
-                )
+            
+            val containerSize = remember(constraints.maxWidth, constraints.maxHeight) {
+                if (constraints.hasBoundedWidth && constraints.hasBoundedHeight && constraints.maxWidth > 0 && constraints.maxHeight > 0) {
+                    IntSize(constraints.maxWidth, constraints.maxHeight)
+                } else {
+                    null
+                }
+            }
+
+            LaunchedEffect(key1 = vueReaderState, key2 = configuration.orientation, key3 = containerSize) {
+                containerSize?.let { validSize ->
+                    vueReaderState.load(
+                        context = context,
+                        coroutineScope = coroutineScope,
+                        containerSize = validSize,
+                        isPortrait = configuration.orientation == Configuration.ORIENTATION_PORTRAIT,
+                        customResource = null
+                    )
+                }
             }
             VerticalVueReader(
                 modifier = Modifier.fillMaxSize(),
