@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Button
@@ -12,7 +14,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
@@ -25,8 +26,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import com.pratikk.jetpdfvue.VerticalVueReader
-import com.pratikk.jetpdfvue.state.VueFilePicker
-import com.pratikk.jetpdfvue.state.VueImportSources
 import com.pratikk.jetpdfvue.state.VueLoadState
 import com.pratikk.jetpdfvue.state.VueResourceType
 import com.pratikk.jetpdfvue.state.rememberVerticalVueReaderState
@@ -47,16 +46,18 @@ fun MainScreen(vm: LegatoPagesViewModel = viewModel()) {
     )
     val permissionState = rememberMultiplePermissionsState(permissions)
 
-    val context = LocalContext.current
-    val filePicker = rememberSaveable(saver = VueFilePicker.Saver) {
-        VueFilePicker()
-    }
-    val launcher = filePicker.getLauncher(onResult = {
-        vm.onUriSelected(it)
-    })
+   
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+        onResult = { uri ->
+            if (uri != null) {
+                vm.onUriSelected(uri)
+            }
+        }
+    )
 
     val launchFilePickerAction: () -> Unit = {
-        filePicker.launchIntent(context, listOf(VueImportSources.PDF), launcher)
+        filePickerLauncher.launch(arrayOf("application/pdf"))
     }
 
     Column(
@@ -69,9 +70,7 @@ fun MainScreen(vm: LegatoPagesViewModel = viewModel()) {
         if (!permissionState.allPermissionsGranted) {
             PermissionRequestScreen { permissionState.launchMultiplePermissionRequest() }
         } else if (uiState.pdfUri == null) {
-            FileSelectScreen {
-                launchFilePickerAction()
-            }
+            FileSelectScreen(onFileSelectClicked = launchFilePickerAction)
         } else {
             AppContentScreen(
                 uiState = uiState,
@@ -209,7 +208,7 @@ fun PdfViewer(
     Column(modifier = modifier.fillMaxSize()) {
         BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
             val configuration = LocalConfiguration.current
-            
+
             val containerSize = remember(constraints.maxWidth, constraints.maxHeight) {
                 if (constraints.hasBoundedWidth && constraints.hasBoundedHeight && constraints.maxWidth > 0 && constraints.maxHeight > 0) {
                     IntSize(constraints.maxWidth, constraints.maxHeight)

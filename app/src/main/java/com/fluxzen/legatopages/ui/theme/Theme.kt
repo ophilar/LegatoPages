@@ -30,7 +30,7 @@ private val LightColorScheme = lightColorScheme(
 @Composable
 fun LegatoPagesTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    // Dynamic color is available on Android S+
+   
     dynamicColor: Boolean = true,
     content: @Composable () -> Unit
 ) {
@@ -48,7 +48,7 @@ fun LegatoPagesTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            // window.statusBarColor = colorScheme.primary.toArgb() // Removed this line
+           
             WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = darkTheme
         }
     }
