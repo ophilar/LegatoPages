@@ -3,6 +3,7 @@ package com.fluxzen.legatopages.ui
 
 import android.content.res.Configuration
 import android.net.Uri
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -10,7 +11,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -43,7 +46,7 @@ fun PdfViewer(
     uiState: UiState,
     vm: LegatoPagesViewModel,
     pdfUri: Uri,
-    onLoadNewDocumentClicked: () -> Unit
+    onLoadNewDocumentClicked: () -> Unit,
 ) {
     val vueReaderState = rememberHorizontalVueReaderState(resource = VueResourceType.Local(pdfUri))
     val remotePageRequest by vm.remotePageRequest.collectAsState()
@@ -51,10 +54,9 @@ fun PdfViewer(
     val context = LocalContext.current
 
     var containerSize by remember { mutableStateOf<IntSize?>(null) }
-    val configuration = LocalConfiguration.current
-    val isPortrait = configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+    val isPortrait = LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT
 
-
+    // --- State and Effect logic remains the same ---
     LaunchedEffect(remotePageRequest) {
         remotePageRequest?.let { page ->
             val targetPage = page + 1
@@ -78,65 +80,70 @@ fun PdfViewer(
         }
     }
 
-
     LaunchedEffect(vueReaderState.currentPage) {
         if (vueReaderState.vueLoadState is VueLoadState.DocumentLoaded) {
             vm.onPageChangedByUi(vueReaderState.currentPage - 1)
         }
     }
 
-
-    Scaffold(
-        modifier = modifier,
-        topBar = {
-            ConnectionTopBar(
-                uiState = uiState,
-                onBecomeLeader = { vm.startAdvertising() },
-                onBecomeFollower = { vm.startDiscovery() }
-            )
-        },
-        bottomBar = {
-            if (vueReaderState.vueLoadState is VueLoadState.DocumentLoaded) {
-                NavigationBottomBar(
-                    vueReaderState = vueReaderState,
-                    onLoadNewDocumentClicked = onLoadNewDocumentClicked
+    // Use Surface to set a background color for the whole screen
+    Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Scaffold(
+            topBar = {
+                ConnectionTopBar(
+                    uiState = uiState,
+                    onBecomeLeader = { vm.startAdvertising() },
+                    onBecomeFollower = { vm.startDiscovery() }
                 )
-            }
-        },
-        containerColor = Color.Transparent
-    ) { scaffoldPadding ->
-
-        Box(
-            modifier = Modifier
-                .padding(scaffoldPadding)
-                .fillMaxSize()
-                .onSizeChanged { containerSize = it },
-            contentAlignment = Alignment.Center
-        ) {
-
-            LaunchedEffect(key1 = containerSize, key2 = pdfUri, key3 = isPortrait) {
-                containerSize?.let {
-                    vueReaderState.load(
-                        context, coroutineScope, it, isPortrait,
-                        customResource = null
+            },
+            bottomBar = {
+                // Only show the bottom bar when the document is loaded
+                if (vueReaderState.vueLoadState is VueLoadState.DocumentLoaded) {
+                    NavigationBottomBar(
+                        vueReaderState = vueReaderState,
+                        onLoadNewDocumentClicked = onLoadNewDocumentClicked
                     )
                 }
-            }
+            },
+            containerColor = Color.Transparent // Let the Surface color show through
+        ) { scaffoldPadding ->
+            Box(
+                modifier = Modifier
+                    .padding(scaffoldPadding)
+                    .fillMaxSize()
+                    .onSizeChanged { containerSize = it },
+                contentAlignment = Alignment.Center
+            ) {
+                LaunchedEffect(key1 = containerSize, key2 = pdfUri) {
+                    containerSize?.let {
+                        vueReaderState.load(
+                            context, coroutineScope, it, isPortrait,
+                            customResource = null
+                        )
+                    }
+                }
 
-            val isLoaded = vueReaderState.vueLoadState is VueLoadState.DocumentLoaded
+                // --- USE CROSSFADE TO FIX FLICKER AND STABILIZE GESTURES ---
+                Crossfade(
+                    targetState = vueReaderState.vueLoadState,
+                    label = "PdfViewOrLoading"
+                ) { state ->
+                    when (state) {
+                        is VueLoadState.DocumentLoaded -> {
+                            HorizontalVueReader(
+                                modifier = Modifier.fillMaxSize(),
+                                horizontalVueReaderState = vueReaderState
+                            )
+                        }
 
-            if (isLoaded) {
-
-                HorizontalVueReader(
-                    modifier = Modifier.fillMaxSize(),
-                    horizontalVueReaderState = vueReaderState
-                )
-            } else {
-
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator()
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(text = "Loading Document...")
+                        else -> {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                CircularProgressIndicator()
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(text = "Loading Document...")
+                            }
+                        }
+                    }
                 }
             }
         }
