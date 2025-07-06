@@ -63,6 +63,7 @@ dependencies {
     implementation(libs.androidx.appcompat)
     implementation(libs.accompanist.permissions)
     implementation(libs.pratikksahu.jetpdfvue)
+    implementation(libs.androidx.runtime)
     testImplementation(platform(libs.androidx.compose.bom))
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

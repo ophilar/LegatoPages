@@ -12,6 +12,7 @@ espressoCore = "3.6.1"
 appcompat = "1.7.1"
 lifecycleRuntimeKtx = "2.9.1"
 playServicesNearby = "19.3.0"
+runtime = "1.8.3"
 
 [libraries]
 accompanist-permissions = { module = "com.google.accompanist:accompanist-permissions", version.ref = "accompanistPermissions" }
@@ -33,6 +34,7 @@ androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-co
 androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
 play-services-nearby = { module = "com.google.android.gms:play-services-nearby", version.ref = "playServicesNearby" }
 pratikksahu-jetpdfvue = { module = "com.github.pratikksahu:JetPDFVue", version.ref = "jetpdfvueVersion" }
+androidx-runtime = { group = "androidx.compose.runtime", name = "runtime", version.ref = "runtime" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

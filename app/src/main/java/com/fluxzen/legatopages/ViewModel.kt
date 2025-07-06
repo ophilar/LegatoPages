@@ -23,6 +23,14 @@ class LegatoPagesViewModel(application: Application) : AndroidViewModel(applicat
 
     private val syncManager = SyncManager(
         application,
+        onConnectionResult = { isConnected, isLeader ->
+            _uiState.update {
+                it.copy(
+                    isConnected = isConnected,
+                    isLeader = if (isConnected) isLeader else false 
+                )
+            }
+        },
         onStatusUpdate = { status -> _uiState.update { it.copy(connectionStatus = status) } },
         onPageReceived = { page -> _remotePageRequest.value = page }
     ).apply {
@@ -37,26 +45,27 @@ class LegatoPagesViewModel(application: Application) : AndroidViewModel(applicat
         return File(getApplication<Application>().filesDir, "selected_score.pdf")
     }
 
-    fun onUriSelected(selectedUri: Uri) {
+   fun onUriSelected(selectedUri: Uri) {
         viewModelScope.launch {
             try {
                 val internalFile = getInternalFile()
-               
+
                 getApplication<Application>().contentResolver.openInputStream(selectedUri)?.use { input ->
                     internalFile.outputStream().use { output ->
                         input.copyTo(output)
                     }
                 } ?: throw Exception("Could not open input stream")
 
+                
+                
                 val internalUri = internalFile.toUri()
 
-               
+                
                 val prefs = getApplication<Application>().getSharedPreferences("LegatoPagesPrefs", Context.MODE_PRIVATE)
-                prefs.edit {putString("lastPdfUri", internalUri.toString())}
+                prefs.edit { putBoolean("lastPdfExists", true) }
 
                 _uiState.update { it.copy(pdfUri = internalUri) }
             } catch (e: Exception) {
-               
                 _uiState.update { it.copy(connectionStatus = "Error loading file: ${e.message}") }
             }
         }
@@ -64,18 +73,16 @@ class LegatoPagesViewModel(application: Application) : AndroidViewModel(applicat
 
     private fun loadLastOpenedPdf() {
         val prefs = getApplication<Application>().getSharedPreferences("LegatoPagesPrefs", Context.MODE_PRIVATE)
-        val uriString = prefs.getString("lastPdfUri", null)
-        if (uriString != null) {
-            val uri = uriString.toUri()
-           
-            uri.path?.let {
-                val internalFile = File(it)
-                if (internalFile.exists()) {
-                    _uiState.update { state -> state.copy(pdfUri = uri) }
-                } else {
-                   
-                    prefs.edit {remove("lastPdfUri")}
-                }
+        val pdfExists = prefs.getBoolean("lastPdfExists", false)
+
+        if (pdfExists) {
+            val internalFile = getInternalFile()
+            if (internalFile.exists()) {
+                
+                _uiState.update { it.copy(pdfUri = internalFile.toUri()) }
+            } else {
+                
+                prefs.edit { remove("lastPdfExists") }
             }
         }
     }
@@ -86,8 +93,16 @@ class LegatoPagesViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
-    fun startAdvertising() = syncManager.startAdvertising()
-    fun startDiscovery() = syncManager.startDiscovery()
+     fun startAdvertising() {
+        _uiState.update { it.copy(isLeader = true) } 
+        syncManager.startAdvertising()
+    }
+
+    fun startDiscovery() {
+        _uiState.update { it.copy(isLeader = false) }
+        syncManager.startDiscovery()
+    }
+    
     fun consumeRemotePageRequest() {
         _remotePageRequest.value = null
     }

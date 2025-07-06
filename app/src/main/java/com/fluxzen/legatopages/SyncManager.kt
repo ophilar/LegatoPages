@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets
 
 class SyncManager(
     private val context: Context,
+    private val onConnectionResult: (Boolean, Boolean) -> Unit, 
     private val onStatusUpdate: (String) -> Unit,
     private val onPageReceived: (Int) -> Unit
 ) {
@@ -15,10 +16,11 @@ class SyncManager(
     private val strategy = Strategy.P2P_STAR
 
     private var connectedEndpointId: String? = null
-
+    private var isLeader: Boolean = false 
     
 
     fun startAdvertising() {
+        isLeader = true 
         val advertisingOptions = AdvertisingOptions.Builder().setStrategy(strategy).build()
         connectionsClient.startAdvertising(
             "Leader Device", 
@@ -33,6 +35,7 @@ class SyncManager(
     }
 
     fun startDiscovery() {
+        isLeader = false 
         val discoveryOptions = DiscoveryOptions.Builder().setStrategy(strategy).build()
         connectionsClient.startDiscovery(
             serviceId,
@@ -69,31 +72,25 @@ class SyncManager(
         }
 
         override fun onConnectionResult(endpointId: String, result: ConnectionResolution) {
-            when (result.status.statusCode) {
-                ConnectionsStatusCodes.STATUS_OK -> {
-                    onStatusUpdate("Connected to device!")
-                    connectedEndpointId = endpointId
-                    connectionsClient.stopDiscovery()
-                    connectionsClient.stopAdvertising()
-                }
-                ConnectionsStatusCodes.STATUS_CONNECTION_REJECTED -> {
-                    onStatusUpdate("Connection rejected.")
-                    connectedEndpointId = null
-                }
-                ConnectionsStatusCodes.STATUS_ERROR -> {
-                    onStatusUpdate("Connection error.")
-                    connectedEndpointId = null
-                }
-                else -> {
-                    onStatusUpdate("Unknown connection result.")
-                    connectedEndpointId = null
-                }
+            val wasConnectedSuccessfully = result.status.statusCode == ConnectionsStatusCodes.STATUS_OK
+            if (wasConnectedSuccessfully) {
+                onStatusUpdate("Connected to device!")
+                connectedEndpointId = endpointId
+                connectionsClient.stopDiscovery()
+                connectionsClient.stopAdvertising()
+            } else {
+                onStatusUpdate("Connection failed.")
+                connectedEndpointId = null
             }
+            
+            onConnectionResult(wasConnectedSuccessfully, isLeader)
         }
 
         override fun onDisconnected(endpointId: String) {
             onStatusUpdate("Disconnected from device.")
             connectedEndpointId = null
+            
+            onConnectionResult(false, isLeader)
         }
     }
 
