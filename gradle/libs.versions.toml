@@ -14,6 +14,7 @@ lifecycleRuntimeKtx = "2.9.1"
 playServicesNearby = "19.3.0"
 runtime = "1.8.3"
 material3 = "1.3.2"
+foundation = "1.8.3"
 
 [libraries]
 accompanist-permissions = { module = "com.google.accompanist:accompanist-permissions", version.ref = "accompanistPermissions" }
@@ -37,6 +38,7 @@ play-services-nearby = { module = "com.google.android.gms:play-services-nearby",
 pratikksahu-jetpdfvue = { module = "com.github.pratikksahu:JetPDFVue", version.ref = "jetpdfvueVersion" }
 androidx-runtime = { group = "androidx.compose.runtime", name = "runtime", version.ref = "runtime" }
 material3 = { group = "androidx.compose.material3", name = "material3", version.ref = "material3" }
+androidx-foundation = { group = "androidx.compose.foundation", name = "foundation", version.ref = "foundation" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
