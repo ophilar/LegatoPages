@@ -62,7 +62,7 @@ dependencies {
     implementation(libs.play.services.nearby)
     implementation(libs.androidx.appcompat)
     implementation(libs.accompanist.permissions)
-    implementation(libs.pratikksahu.jetpdfvue)
+//    implementation(libs.pratikksahu.jetpdfvue)
     implementation(libs.androidx.runtime)
     implementation(libs.material3)
     implementation(libs.androidx.foundation)

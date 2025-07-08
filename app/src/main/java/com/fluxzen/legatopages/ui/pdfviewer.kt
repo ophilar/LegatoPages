@@ -4,12 +4,24 @@ import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -17,6 +29,9 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import android.util.Size
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
 
 @Composable
 fun PdfViewerScreen(
@@ -25,12 +40,10 @@ fun PdfViewerScreen(
     thisDeviceIndex: Int,
     totalDevices: Int,
     onTurnPage: (Int) -> Unit,
-    statusText: String
+    statusText: String,
 ) {
     val context = LocalContext.current
 
-    
-    
     val renderer = remember(pdfUri) { PdfPageRenderer(context, pdfUri) }
     DisposableEffect(renderer) {
         onDispose {
@@ -38,27 +51,33 @@ fun PdfViewerScreen(
         }
     }
 
-    
     var bitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
     var isLoading by remember { mutableStateOf(false) }
+    var pdfContainerSize: IntSize? by remember { mutableStateOf(null) }
 
     val pageTurnIncrement = totalDevices
-    
     val actualPageIndex = bookPage + thisDeviceIndex
 
-    
-    LaunchedEffect(renderer, actualPageIndex) {
-        if (actualPageIndex >= renderer.pageCount) return@LaunchedEffect
-        isLoading = true
-        bitmap = renderer.renderPage(actualPageIndex)
-        isLoading = false
+    LaunchedEffect(renderer, actualPageIndex, pdfContainerSize) {
+        pdfContainerSize?.let { validSize ->
+            if (actualPageIndex < renderer.pageCount) {
+                isLoading = true
+                bitmap =
+                    renderer.renderPage(actualPageIndex, Size(validSize.width, validSize.height))
+                isLoading = false
+            } else {
+
+                bitmap = null
+            }
+        }
     }
 
     Column(Modifier.fillMaxSize()) {
-        
         Surface(shadowElevation = 4.dp) {
             Row(
-                Modifier.fillMaxWidth().padding(16.dp),
+                Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
@@ -70,12 +89,14 @@ fun PdfViewerScreen(
             }
         }
 
-        
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .background(Color.DarkGray),
+                .background(Color.DarkGray)
+                .onSizeChanged { measuredSize ->
+                    pdfContainerSize = measuredSize
+                },
             contentAlignment = Alignment.Center
         ) {
             if (isLoading) {
@@ -86,25 +107,29 @@ fun PdfViewerScreen(
                     contentDescription = "PDF Page ${actualPageIndex + 1}",
                     modifier = Modifier
                         .fillMaxSize()
-                        
-                        .pointerInput(totalDevices, bookPage) { 
+
+                        .pointerInput(totalDevices, bookPage) {
+                            var totalDrag = 0f
                             detectHorizontalDragGestures(
-                                onDragEnd = {
-                                    
+                                onDragStart = {
+                                    totalDrag = 0f
                                 },
                                 onHorizontalDrag = { change, dragAmount ->
-                                    change.consume() 
-                                    
-                                    
-                                    val swipeThreshold = 50 
+                                    change.consume()
+                                    totalDrag += dragAmount
+                                },
+                                onDragEnd = {
+                                    val swipeThreshold = 100
 
-                                    if (dragAmount < -swipeThreshold) { 
+                                    if (totalDrag < -swipeThreshold) {
                                         val newBookPage = bookPage + pageTurnIncrement
-                                        if ((newBookPage + thisDeviceIndex) < renderer.pageCount) {
+
+                                        if (newBookPage < renderer.pageCount) {
                                             onTurnPage(newBookPage)
                                         }
-                                    } else if (dragAmount > swipeThreshold) { 
-                                        val newBookPage = (bookPage - pageTurnIncrement).coerceAtLeast(0)
+                                    } else if (totalDrag > swipeThreshold) {
+                                        val newBookPage =
+                                            (bookPage - pageTurnIncrement).coerceAtLeast(0)
                                         onTurnPage(newBookPage)
                                     }
                                 }
@@ -112,7 +137,8 @@ fun PdfViewerScreen(
                         }
                 )
             } else {
-                Text("Could not load page.", color = Color.White)
+
+                Text("No page to display.", color = Color.White)
             }
         }
     }

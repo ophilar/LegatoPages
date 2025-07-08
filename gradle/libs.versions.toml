@@ -35,7 +35,7 @@ androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "j
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
 androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
 play-services-nearby = { module = "com.google.android.gms:play-services-nearby", version.ref = "playServicesNearby" }
-pratikksahu-jetpdfvue = { module = "com.github.pratikksahu:JetPDFVue", version.ref = "jetpdfvueVersion" }
+#pratikksahu-jetpdfvue = { module = "com.github.pratikksahu:JetPDFVue", version.ref = "jetpdfvueVersion" }
 androidx-runtime = { group = "androidx.compose.runtime", name = "runtime", version.ref = "runtime" }
 material3 = { group = "androidx.compose.material3", name = "material3", version.ref = "material3" }
 androidx-foundation = { group = "androidx.compose.foundation", name = "foundation", version.ref = "foundation" }

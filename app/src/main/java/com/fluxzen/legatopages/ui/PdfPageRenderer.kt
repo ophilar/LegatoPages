@@ -5,9 +5,11 @@ import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import androidx.core.graphics.createBitmap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import androidx.core.graphics.createBitmap
+import android.graphics.Matrix
+import android.util.Size
 
 class PdfPageRenderer(context: Context, pdfUri: Uri) {
 
@@ -19,15 +21,26 @@ class PdfPageRenderer(context: Context, pdfUri: Uri) {
 
     val pageCount: Int = pdfRenderer?.pageCount ?: 0
 
-    suspend fun renderPage(pageIndex: Int): Bitmap? {
+    suspend fun renderPage(pageIndex: Int, destSize: Size): Bitmap? {
         if (pdfRenderer == null || pageIndex < 0 || pageIndex >= pageCount) {
             return null
         }
-        
+
         return withContext(Dispatchers.Default) {
             val page = pdfRenderer.openPage(pageIndex)
-            val bitmap = createBitmap(page.width, page.height)
-            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+
+            val scale = minOf(
+                destSize.width.toFloat() / page.width,
+                destSize.height.toFloat() / page.height
+            )
+
+            val bitmap = createBitmap((page.width * scale).toInt(), (page.height * scale).toInt())
+            val matrix = Matrix().apply {
+                postScale(scale, scale)
+            }
+            bitmap.eraseColor(android.graphics.Color.WHITE)
+
+            page.render(bitmap, null, matrix, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
             page.close()
             bitmap
         }
