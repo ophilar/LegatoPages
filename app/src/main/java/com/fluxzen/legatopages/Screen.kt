@@ -68,13 +68,25 @@ fun MainScreen() {
         )
     }
 
+    val permissions = listOf(
+        Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_ADVERTISE,
+        Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.ACCESS_FINE_LOCATION,
+        Manifest.permission.NEARBY_WIFI_DEVICES,
+    )
+    val permissionState = rememberMultiplePermissionsState(permissions)
+
+    LaunchedEffect(permissionState.allPermissionsGranted) {
+        if (permissionState.allPermissionsGranted) {
+            syncManager.start()
+        }
+    }
+
     DisposableEffect(Unit) {
         syncManager.start()
         onDispose {
             syncManager.stop()
         }
     }
-
 
     val onTurnPage = { newBookPage: Int ->
         bookPage = newBookPage
@@ -103,13 +115,6 @@ fun MainScreen() {
             filePickerLauncher.launch(arrayOf("application/pdf"))
         }
     }
-
-    val permissions = listOf(
-        Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_ADVERTISE,
-        Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.ACCESS_FINE_LOCATION,
-        Manifest.permission.NEARBY_WIFI_DEVICES,
-    )
-    val permissionState = rememberMultiplePermissionsState(permissions)
 
     Column(
         modifier = Modifier

@@ -29,6 +29,9 @@ class SyncManager(
 
     private val strategy = Strategy.P2P_CLUSTER
 
+    private var isAdvertising = false
+    private var isDiscovering = false
+
     private val connectedEndpoints = mutableMapOf<String, String>()
 
     private val connectionLifecycleCallback = object : ConnectionLifecycleCallback() {
@@ -90,7 +93,12 @@ class SyncManager(
     }
 
     fun start() {
+        if (isAdvertising || isDiscovering) {
+            onStatusUpdate("Sync already in progress.")
+            return
+        }
         onStatusUpdate("Starting sync...")
+
         val advertisingOptions = AdvertisingOptions.Builder().setStrategy(strategy).build()
         connectionsClient.startAdvertising(
             "LegatoPages Device",
@@ -98,13 +106,25 @@ class SyncManager(
             connectionLifecycleCallback,
             advertisingOptions
         )
-            .addOnSuccessListener { onStatusUpdate("Advertising...") }
-            .addOnFailureListener { e -> onStatusUpdate("Advertising failed: ${e.message}") }
+            .addOnSuccessListener {
+                onStatusUpdate("Advertising...")
+                isAdvertising = true
+            }
+            .addOnFailureListener { e ->
+                onStatusUpdate("Advertising failed: ${e.message}")
+                isAdvertising = false
+            }
 
         val discoveryOptions = DiscoveryOptions.Builder().setStrategy(strategy).build()
         connectionsClient.startDiscovery(serviceId, endpointDiscoveryCallback, discoveryOptions)
-            .addOnSuccessListener { onStatusUpdate("Discovering...") }
-            .addOnFailureListener { e -> onStatusUpdate("Discovery failed: ${e.message}") }
+            .addOnSuccessListener {
+                onStatusUpdate("Discovering...")
+                isDiscovering = true
+            }
+            .addOnFailureListener { e ->
+                onStatusUpdate("Discovery failed: ${e.message}")
+                isDiscovering = false
+            }
     }
 
     fun broadcastPageTurn(pageTurn: PageTurn) {
@@ -121,5 +141,7 @@ class SyncManager(
         connectionsClient.stopAllEndpoints()
         connectedEndpoints.clear()
         onDeviceCountChanged(1)
+        isAdvertising = false
+        isDiscovering = false
     }
 }
