@@ -18,6 +18,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -43,21 +44,21 @@ fun MainScreen() {
     var statusText by remember { mutableStateOf("Not Connected") }
 
     val context = LocalContext.current
+    val pdfPrefs = remember { PdfPreferences(context) }
 
-
+    LaunchedEffect(Unit) {
+        pdfPrefs.getLastPosition()?.let { lastPosition ->
+            pdfUri = lastPosition.uri
+            bookPage = lastPosition.bookPage
+        }
+    }
+    
     val syncManager = remember {
         SyncManager(
             context = context,
-            onPageTurnReceived = { pageTurn ->
-
-                bookPage = pageTurn.bookPage
-            },
-            onDeviceCountChanged = { count ->
+            onPageTurnReceived = { pageTurn -> bookPage = pageTurn.bookPage},
+            onDeviceCountChanged = { count -> 
                 totalDevices = count
-
-
-
-
                 thisDeviceIndex = 0
             },
             onStatusUpdate = { status -> statusText = status }
@@ -76,13 +77,19 @@ fun MainScreen() {
     val onTurnPage = { newBookPage: Int ->
         bookPage = newBookPage
         syncManager.broadcastPageTurn(PageTurn(newBookPage))
+        pdfUri?.let { uri ->
+            pdfPrefs.saveLastPosition(uri, newBookPage)
+        }
     }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
         onResult = { uri ->
             if (uri != null) {
+                val newBookPage = 0 
+                pdfPrefs.saveLastPosition(uri, newBookPage) 
                 pdfUri = uri
+                bookPage = newBookPage
             }
         }
     )
@@ -114,7 +121,8 @@ fun MainScreen() {
                 thisDeviceIndex = thisDeviceIndex,
                 totalDevices = totalDevices,
                 onTurnPage = onTurnPage,
-                statusText = statusText
+                statusText = statusText,
+                onLoadNewDocumentClicked = launchFilePicker
             )
         }
     }

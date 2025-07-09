@@ -2,14 +2,14 @@ package com.fluxzen.legatopages.ui
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Matrix
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import android.util.Size
 import androidx.core.graphics.createBitmap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import android.graphics.Matrix
-import android.util.Size
 
 class PdfPageRenderer(context: Context, pdfUri: Uri) {
 
