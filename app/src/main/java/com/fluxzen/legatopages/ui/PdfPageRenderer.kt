@@ -13,13 +13,18 @@ import kotlinx.coroutines.withContext
 
 class PdfPageRenderer(context: Context, pdfUri: Uri) {
 
-    private val parcelFileDescriptor: ParcelFileDescriptor? =
-        context.contentResolver.openFileDescriptor(pdfUri, "r")
+    private val parcelFileDescriptor: ParcelFileDescriptor? by lazy {
+        context.contentResolver.openFileDescriptor(
+            pdfUri,
+            "r"
+        )
+    }
 
-    private val pdfRenderer: PdfRenderer? =
+    private val pdfRenderer: PdfRenderer? by lazy {
         parcelFileDescriptor?.let { PdfRenderer(it) }
+    }
 
-    val pageCount: Int = pdfRenderer?.pageCount ?: 0
+    val pageCount: Int by lazy { pdfRenderer?.pageCount ?: 0 }
 
     suspend fun renderPage(pageIndex: Int, destSize: Size): Bitmap? {
         if (pdfRenderer == null || pageIndex < 0 || pageIndex >= pageCount) {
@@ -27,7 +32,7 @@ class PdfPageRenderer(context: Context, pdfUri: Uri) {
         }
 
         return withContext(Dispatchers.Default) {
-            val page = pdfRenderer.openPage(pageIndex)
+            val page = pdfRenderer!!.openPage(pageIndex)
 
             val scale = minOf(
                 destSize.width.toFloat() / page.width,
@@ -47,7 +52,9 @@ class PdfPageRenderer(context: Context, pdfUri: Uri) {
     }
 
     fun close() {
-        pdfRenderer?.close()
-        parcelFileDescriptor?.close()
+        if (pdfRenderer != null) {
+            pdfRenderer?.close()
+            parcelFileDescriptor?.close()
+        }
     }
 }

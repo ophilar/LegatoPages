@@ -1,6 +1,7 @@
 package com.fluxzen.legatopages
 
 import android.Manifest
+import android.content.Context
 import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -32,6 +33,8 @@ import androidx.compose.ui.unit.dp
 import com.fluxzen.legatopages.ui.PdfViewerScreen
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
+import java.io.File
+import java.io.FileOutputStream
 
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
 @OptIn(ExperimentalPermissionsApi::class)
@@ -52,19 +55,18 @@ fun MainScreen() {
             bookPage = lastPosition.bookPage
         }
     }
-    
-    val syncManager = remember {
+
+    val syncManager = remember(context.applicationContext) {
         SyncManager(
-            context = context,
-            onPageTurnReceived = { pageTurn -> bookPage = pageTurn.bookPage},
-            onDeviceCountChanged = { count -> 
+            context = context.applicationContext,
+            onPageTurnReceived = { pageTurn -> bookPage = pageTurn.bookPage },
+            onDeviceCountChanged = { count ->
                 totalDevices = count
                 thisDeviceIndex = 0
             },
             onStatusUpdate = { status -> statusText = status }
         )
     }
-
 
     DisposableEffect(Unit) {
         syncManager.start()
@@ -86,19 +88,26 @@ fun MainScreen() {
         contract = ActivityResultContracts.OpenDocument(),
         onResult = { uri ->
             if (uri != null) {
-                val newBookPage = 0 
-                pdfPrefs.saveLastPosition(uri, newBookPage) 
-                pdfUri = uri
+                val localUri = copyUriToInternalStorage(context, uri)
+                val newBookPage = 0
+                pdfPrefs.saveLastPosition(localUri, newBookPage)
+                pdfUri = localUri
                 bookPage = newBookPage
             }
         }
     )
-    val launchFilePicker = remember { { filePickerLauncher.launch(arrayOf("application/pdf")) } }
 
+    val launchFilePicker = remember {
+        {
+            pdfPrefs.clearLastPosition()
+            filePickerLauncher.launch(arrayOf("application/pdf"))
+        }
+    }
 
     val permissions = listOf(
         Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_ADVERTISE,
-        Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.ACCESS_FINE_LOCATION
+        Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.ACCESS_FINE_LOCATION,
+        Manifest.permission.NEARBY_WIFI_DEVICES,
     )
     val permissionState = rememberMultiplePermissionsState(permissions)
 
@@ -126,6 +135,16 @@ fun MainScreen() {
             )
         }
     }
+}
+
+private fun copyUriToInternalStorage(context: Context, uri: Uri): Uri {
+    val inputStream = context.contentResolver.openInputStream(uri)
+    val file = File(context.filesDir, "last_opened_document.pdf")
+    val outputStream = FileOutputStream(file)
+    inputStream?.copyTo(outputStream)
+    outputStream.close()
+    inputStream?.close()
+    return Uri.fromFile(file)
 }
 
 

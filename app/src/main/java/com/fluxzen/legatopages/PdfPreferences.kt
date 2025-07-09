@@ -26,4 +26,11 @@ class PdfPreferences(context: Context) {
             LastPosition(uri = it.toUri(), bookPage = bookPage)
         }
     }
+
+    fun clearLastPosition() {
+        prefs.edit {
+            remove("lastPdfUri")
+            remove("lastBookPage")
+        }
+    }
 }

@@ -62,7 +62,9 @@ fun PdfViewerScreen(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.DarkGray)) {
+    Box(modifier = Modifier.fillMaxSize().background(Color.DarkGray).onSizeChanged { measuredSize ->
+        pdfContainerSize = measuredSize
+    }) {
         
         if (bitmap != null) {
             Image(
@@ -70,9 +72,6 @@ fun PdfViewerScreen(
                 contentDescription = "PDF Page ${actualPageIndex + 1}",
                 modifier = Modifier
                     .fillMaxSize()
-                    .onSizeChanged { measuredSize ->
-                        pdfContainerSize = measuredSize
-                    }
                     .pointerInput(totalDevices, bookPage) {
                         var totalDrag = 0f
                         detectHorizontalDragGestures(
