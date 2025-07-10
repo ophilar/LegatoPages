@@ -1,6 +1,8 @@
 package com.fluxzen.legatopages
 
 import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
 import android.util.Log
 import com.google.android.gms.nearby.connection.Payload
 import java.io.File
@@ -13,7 +15,7 @@ import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import kotlin.let
 
-class CacheManager(context: Context) {
+class CacheManager(private val context: Context) {
 
     private val cacheDir = File(context.cacheDir, "shared_pdfs").apply { mkdirs() }
     private val cacheDuration = TimeUnit.DAYS.toMillis(7)
@@ -27,6 +29,35 @@ class CacheManager(context: Context) {
         }
         return BigInteger(1, md.digest()).toString(16).padStart(32, '0')
     }
+
+    fun cacheFileFromUri(uri: Uri): Pair<String, File>? {
+        try {
+            val fileName = getFileName(uri) ?: "cached_file_${System.currentTimeMillis()}"
+            val tempFile = File(cacheDir, "$fileName.tmp")
+
+            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                tempFile.outputStream().use { outputStream ->
+                    inputStream.copyTo(outputStream)
+                }
+                // Ensure this InputStream is closed
+                tempFile.inputStream().use { hashInputStream ->
+                    val hash = getFileHash(hashInputStream)
+                    val finalFile = File(cacheDir, hash)
+
+                    if (finalFile.exists()) {
+                        tempFile.delete() // Hash collision, file already cached.
+                    } else {
+                        tempFile.renameTo(finalFile)
+                    }
+                    return hash to finalFile
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("CacheManager", "Error caching file from URI", e)
+        }
+        return null
+    }
+
 
     fun saveReceivedFile(payload: Payload): File? {
         try {
@@ -115,6 +146,16 @@ class CacheManager(context: Context) {
         return null
     }
 
+    fun getCachedFile(fileHash: String): File? {
+        val file = File(cacheDir, fileHash)
+        return if (file.exists()) {
+            file.setLastModified(System.currentTimeMillis())
+            file
+        } else {
+            null
+        }
+    }
+
     fun getCachedFile(fileName: String, expectedHash: String): File? {
         val file = File(cacheDir, fileName)
         if (!file.exists()) return null
@@ -145,5 +186,32 @@ class CacheManager(context: Context) {
                 }
             }
         }
+    }
+
+    private fun getFileName(uri: Uri): String? {
+        var result: String? = null
+        if (uri.scheme == "content") {
+            val cursor = context.contentResolver.query(uri, null, null, null, null)
+            try {
+                if (cursor != null && cursor.moveToFirst()) {
+                    val columnIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (columnIndex >= 0) {
+                        result = cursor.getString(columnIndex)
+                    }
+                }
+            } finally {
+                cursor?.close()
+            }
+        }
+        if (result == null) {
+            result = uri.path
+            val cut = result?.lastIndexOf('/')
+            if (cut != -1) {
+                if (cut != null) {
+                    result = result.substring(cut + 1)
+                }
+            }
+        }
+        return result
     }
 }

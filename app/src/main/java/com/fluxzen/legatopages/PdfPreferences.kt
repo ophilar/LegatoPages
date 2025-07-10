@@ -1,35 +1,34 @@
 package com.fluxzen.legatopages
 
 import android.content.Context
-import android.net.Uri
 import androidx.core.content.edit
-import androidx.core.net.toUri
 
-data class LastPosition(val uri: Uri, val bookPage: Int)
+// Storing the file hash is more reliable than a URI, which can become invalid.
+data class LastPosition(val fileHash: String, val bookPage: Int)
 
 class PdfPreferences(context: Context) {
 
     private val prefs = context.getSharedPreferences("LegatoPagesPrefs", Context.MODE_PRIVATE)
 
-    fun saveLastPosition(uri: Uri, bookPage: Int) {
+    fun saveLastPosition(fileHash: String, bookPage: Int) {
         prefs.edit {
-            putString("lastPdfUri", uri.toString())
+            putString("lastFileHash", fileHash)
             putInt("lastBookPage", bookPage)
         }
     }
 
     fun getLastPosition(): LastPosition? {
-        val uriString = prefs.getString("lastPdfUri", null)
+        val fileHash = prefs.getString("lastFileHash", null)
         val bookPage = prefs.getInt("lastBookPage", 0)
 
-        return uriString?.let {
-            LastPosition(uri = it.toUri(), bookPage = bookPage)
+        return fileHash?.let {
+            LastPosition(fileHash = it, bookPage = bookPage)
         }
     }
 
     fun clearLastPosition() {
         prefs.edit {
-            remove("lastPdfUri")
+            remove("lastFileHash")
             remove("lastBookPage")
         }
     }

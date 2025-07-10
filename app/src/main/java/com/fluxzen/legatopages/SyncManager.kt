@@ -32,6 +32,7 @@ class SyncManager(private val context: Context) {
     var onDisconnectedFromLeader: (() -> Unit)? = null
     var onAdvertisingStarted: (() -> Unit)? = null
     var onAdvertisingFailed: (() -> Unit)? = null
+    var onLeadingStopped: (() -> Unit)? = null
 
     private val connectionsClient = Nearby.getConnectionsClient(context)
     private val serviceId = "com.fluxzen.legatopages.SERVICE_ID"
@@ -102,12 +103,17 @@ class SyncManager(private val context: Context) {
             connectionsClient.stopAdvertising()
             isLeader = false
             onStatusUpdate?.invoke("Stopped leading session.")
+            onLeadingStopped?.invoke()
+            connectedEndpoints.forEach { connectionsClient.disconnectFromEndpoint(it.endpointId) }
+            connectedEndpoints.clear()
+            broadcastDeviceArrangement()
         }
     }
     
     fun leaveSession() {
         if (!isLeader && leaderEndpointId != null) {
             connectionsClient.disconnectFromEndpoint(leaderEndpointId!!)
+            leaderEndpointId = null // Clear leaderEndpointId after disconnecting
             onStatusUpdate?.invoke("Leaving session...")
         } else {
             onStatusUpdate?.invoke("Not in a session or already leader.")
@@ -143,8 +149,13 @@ class SyncManager(private val context: Context) {
             } else if (update.status == PayloadTransferUpdate.Status.IN_PROGRESS) {
                 val percent = (update.bytesTransferred * 100) / update.totalBytes
                 onStatusUpdate?.invoke("Receiving file... $percent%")
+            } else if (update.status == PayloadTransferUpdate.Status.FAILURE || update.status == PayloadTransferUpdate.Status.CANCELED) {
+                Log.w("SyncManager", "Payload transfer not SUCCESS: ${update.status} for payload ID: ${update.payloadId}")
+                incomingFilePayloads.remove(update.payloadId)
+                completedFilePayloads.remove(update.payloadId) // Also remove if it was somehow completed then failed
+                onStatusUpdate?.invoke("File transfer failed.")
             } else {
-                Log.w("SyncManager", "Payload transfer update not SUCCESS: ${update.status}")
+                Log.w("SyncManager", "Unhandled payload transfer update: ${update.status}")
             }
         }
     }
@@ -152,7 +163,9 @@ class SyncManager(private val context: Context) {
     private fun handleBytePayload(endpointId: String, bytes: ByteArray) {
         val json = bytes.toString(StandardCharsets.UTF_8)
         val message = try {
-            gson.fromJson(json, SyncMessage::class.java)
+            // Ensure this reflects the actual structure if SyncMessage is an interface/sealed class
+            // For now, assuming direct deserialization works or SyncMessage itself is the target type.
+            gson.fromJson(json, SyncMessage::class.java) // Consider specific types if SyncMessage is a base
         } catch (e: Exception) {
             Log.e("SyncManager", "Error parsing SyncMessage JSON: $json", e)
             return
@@ -214,18 +227,25 @@ class SyncManager(private val context: Context) {
                         sendMessage(endpointId, SyncMessage.PageChanged(currentPageForLeader))
                     }
                 } else {
+                    // This device is a follower and successfully connected to a leader
+                    connectionsClient.stopDiscovery() // Stop discovering other leaders
                     leaderEndpointId = endpointId
                     onLeaderFound?.invoke(endpointId)
                 }
             } else {
                 onStatusUpdate?.invoke("Connection to $deviceName failed: ${result.status.statusMessage}")
                 connectedEndpoints.removeAll { it.endpointId == endpointId }
-                if (isLeader) broadcastDeviceArrangement()
+                if (isLeader) {
+                    broadcastDeviceArrangement()
+                } else if (endpointId == leaderEndpointId) {
+                    // If connection to the intended leader failed, clear leaderEndpointId
+                    leaderEndpointId = null
+                }
             }
         }
 
         override fun onDisconnected(endpointId: String) {
-            val deviceName = connectedEndpoints.find { it.endpointId == endpointId }?.deviceName ?: "a device"
+            val deviceName = connectedEndpoints.find { it.endpointId == endpointId }?.deviceName ?: pendingConnections[endpointId] ?: "a device"
             onStatusUpdate?.invoke("$deviceName disconnected.")
             connectedEndpoints.removeAll { it.endpointId == endpointId }
             pendingConnections.remove(endpointId)
@@ -242,6 +262,7 @@ class SyncManager(private val context: Context) {
     }
 
     private fun startAdvertising() { 
+        connectionsClient.stopDiscovery() // Stop discovery before advertising
         isLeader = true 
         val advertisingOptions = AdvertisingOptions.Builder().setStrategy(strategy).build()
         connectionsClient.startAdvertising(
@@ -257,6 +278,7 @@ class SyncManager(private val context: Context) {
     }
 
     fun startDiscovery() {
+        connectionsClient.stopAdvertising() // Stop advertising before discovering
         isLeader = false
         leaderEndpointId = null
         val discoveryOptions = DiscoveryOptions.Builder().setStrategy(strategy).build()
@@ -264,30 +286,34 @@ class SyncManager(private val context: Context) {
             serviceId, object : EndpointDiscoveryCallback() {
                 override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
                     onStatusUpdate?.invoke("Found leader: ${info.endpointName}. Connecting...")
-                    connectionsClient.stopDiscovery()
+                    // Do not stop discovery here, let onConnectionResult handle it
                     connectionsClient.requestConnection("FollowerDevice", endpointId, connectionLifecycleCallback)
                         .addOnFailureListener { e ->
-                            onStatusUpdate?.invoke("Connection request to ${info.endpointName} failed: ${e.message}. Restarting discovery.")
-                            startDiscovery()
+                            onStatusUpdate?.invoke("Connection request to ${info.endpointName} failed: ${e.message}. Restarting discovery might be needed if no other leaders are found.")
+                            // Optionally, restart discovery if connection fails and no other leader is pending
+                            // For now, relying on the timeout or manual retry.
                         }
                 }
-                override fun onEndpointLost(endpointId: String) { /* No-op for this use case */ }
+                override fun onEndpointLost(endpointId: String) { 
+                    onStatusUpdate?.invoke("Leader ${endpointId} lost during discovery.")
+                }
             }, discoveryOptions
         ).addOnSuccessListener {
             onStatusUpdate?.invoke("Searching for a leader...")
             android.os.Handler(context.mainLooper).postDelayed({
-                if (leaderEndpointId == null && !isLeader) {
+                if (leaderEndpointId == null && !isLeader) { // Check if not connected and not a leader
                     onNoLeaderFound?.invoke()
                 }
-            }, 10000)
+            }, 10000) // 10 seconds timeout for finding a leader
         }.addOnFailureListener { e ->
-            onStatusUpdate?.invoke("Discovery failed: ${e.message}")
+            onStatusUpdate?.invoke("Discovery failed to start: ${e.message}")
             onNoLeaderFound?.invoke()
         }
     }
 
      fun stopDiscovery() {
         connectionsClient.stopDiscovery()
+        onStatusUpdate?.invoke("Stopped discovery.")
     }
 
     fun broadcastPageTurn(pageTurn: PageTurn) {
@@ -336,6 +362,8 @@ class SyncManager(private val context: Context) {
         pendingConnections.clear()
         currentFileUri = null
         currentFileInfo = null
+        incomingFilePayloads.clear()
+        completedFilePayloads.clear()
     }
 
     private fun getFileDetails(uri: Uri): Pair<String, Long> {

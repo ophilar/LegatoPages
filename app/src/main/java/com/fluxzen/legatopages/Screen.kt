@@ -1,8 +1,10 @@
 package com.fluxzen.legatopages
 
 import android.Manifest
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
@@ -45,24 +47,26 @@ fun MainScreen() {
 
     val context = LocalContext.current
     val pdfPreferences = remember { PdfPreferences(context.applicationContext) }
+    val cacheManager = remember { CacheManager(context.applicationContext) }
 
     val syncManager = remember(context.applicationContext) {
         SyncManager(context.applicationContext)
     }
 
-    fun updateStateAndSavePdf(uri: Uri, isLocal: Boolean) {
-        val fileHash = syncManager.getCurrentFileHash()
-        val pageToLoad = fileHash?.let { syncManager.getLastViewedPage(it) } ?: 0
+    fun updateStateAndSavePdf(file: File, isLocal: Boolean) {
+        val fileUri = Uri.fromFile(file)
+        val fileHash = cacheManager.getFileHash(file.inputStream())
+        val pageToLoad = syncManager.getLastViewedPage(fileHash)
 
         val newScreenState = ScreenState.PdfViewer(
-            pdfUri = uri,
+            pdfUri = fileUri,
             bookPage = pageToLoad,
             isActuallyLeading = false,
             statusText = if (isLocal) "PDF loaded. Start leading or find a session." else "File received. Waiting for page sync...",
             isLocalViewingOnly = isLocal
         )
         screenState = newScreenState
-        pdfPreferences.saveLastPosition(newScreenState.pdfUri, newScreenState.bookPage)
+        pdfPreferences.saveLastPosition(fileHash, newScreenState.bookPage)
         if (isLocal) {
             statusTextState = newScreenState.statusText
         }
@@ -72,8 +76,10 @@ fun MainScreen() {
         syncManager.onPageTurnReceived = { pageTurn ->
             (screenState as? ScreenState.PdfViewer)?.let {
                 if (it.pdfUri.toString().isNotEmpty()) {
+                    val file = File(it.pdfUri.path!!)
+                    val hash = cacheManager.getFileHash(file.inputStream())
                     screenState = it.copy(bookPage = pageTurn.bookPage)
-                    pdfPreferences.saveLastPosition(it.pdfUri, pageTurn.bookPage)
+                    pdfPreferences.saveLastPosition(hash, pageTurn.bookPage)
                 }
             }
         }
@@ -86,7 +92,7 @@ fun MainScreen() {
         }
         syncManager.onFileReceived = { file: File ->
             val cachedFileUri = Uri.fromFile(file)
-            updateStateAndSavePdf(cachedFileUri, isLocal = false)
+            updateStateAndSavePdf(file, isLocal = false)
         }
         syncManager.onFollowerJoined = { statusTextState = "Follower joined: ${it.deviceName}" }
         syncManager.onLeaderFound = {
@@ -121,6 +127,15 @@ fun MainScreen() {
                 }
             }
         }
+        syncManager.onLeadingStopped = {
+            (screenState as? ScreenState.PdfViewer)?.let {
+                screenState = it.copy(
+                    isActuallyLeading = false,
+                    isLocalViewingOnly = true,
+                    statusText = "Stopped leading. You are now in local viewing mode."
+                )
+            }
+        }
     }
 
     val permissionsList = remember {
@@ -146,19 +161,13 @@ fun MainScreen() {
         if (permissionState.allPermissionsGranted) {
             if (screenState is ScreenState.Permission) {
                 val lastPosition = pdfPreferences.getLastPosition()
-                if (lastPosition != null && lastPosition.uri.toString().isNotEmpty()) {
-                    var uriAccessible = false
-                    try {
-                        context.contentResolver.openInputStream(lastPosition.uri)?.use { }
-                        uriAccessible = true
-                    } catch (_: Exception) {
-                        pdfPreferences.clearLastPosition()
-                    }
-
-                    if (uriAccessible) {
-                        val syncLoadSuccess = syncManager.loadFile(lastPosition.uri)
+                if (lastPosition != null) {
+                    val file = cacheManager.getCachedFile(lastPosition.fileHash)
+                    if (file != null) {
+                        val fileUri = Uri.fromFile(file)
+                         val syncLoadSuccess = syncManager.loadFile(fileUri)
                         screenState = ScreenState.PdfViewer(
-                            pdfUri = lastPosition.uri,
+                            pdfUri = fileUri,
                             bookPage = lastPosition.bookPage,
                             isActuallyLeading = false,
                             statusText = if (syncLoadSuccess) "Loaded last viewed PDF." else "Loaded last PDF. Sync features might be limited.",
@@ -166,8 +175,9 @@ fun MainScreen() {
                         )
                         statusTextState = (screenState as ScreenState.PdfViewer).statusText
                     } else {
+                        pdfPreferences.clearLastPosition()
                         screenState = ScreenState.SelectPdfToLoadOrDiscover
-                        statusTextState = "Last PDF not found or inaccessible. Please select a PDF."
+                        statusTextState = "Last PDF not found. Please select a PDF."
                     }
                 } else {
                     screenState = ScreenState.SelectPdfToLoadOrDiscover
@@ -185,10 +195,17 @@ fun MainScreen() {
         contract = ActivityResultContracts.OpenDocument(),
         onResult = { uri ->
             if (uri != null) {
-                if (syncManager.loadFile(uri)) {
-                    updateStateAndSavePdf(uri, isLocal = true)
+                val cachedResult = cacheManager.cacheFileFromUri(uri)
+                if (cachedResult != null) {
+                    val (hash, file) = cachedResult
+                    val fileUri = Uri.fromFile(file)
+                    if (syncManager.loadFile(fileUri)) {
+                        updateStateAndSavePdf(file, isLocal = true)
+                    } else {
+                        statusTextState = "Failed to load PDF."
+                    }
                 } else {
-                    statusTextState = "Failed to load PDF."
+                    statusTextState = "Failed to cache PDF."
                 }
             } else {
                 statusTextState = "PDF selection cancelled."
@@ -248,6 +265,8 @@ fun MainScreen() {
                 }
             }
             is ScreenState.PdfViewer -> {
+                val file = File(state.pdfUri.path!!)
+                val hash = cacheManager.getFileHash(file.inputStream())
                 PdfViewerScreen(
                     pdfUri = state.pdfUri,
                     bookPage = state.bookPage,
@@ -255,7 +274,7 @@ fun MainScreen() {
                     onTurnPage = { newBookPage ->
                         (screenState as? ScreenState.PdfViewer)?.let {
                             screenState = it.copy(bookPage = newBookPage)
-                            pdfPreferences.saveLastPosition(it.pdfUri, newBookPage)
+                            pdfPreferences.saveLastPosition(hash, newBookPage)
                         }
                         if (state.isActuallyLeading) {
                             syncManager.broadcastPageTurn(PageTurn(newBookPage))
@@ -271,6 +290,7 @@ fun MainScreen() {
                         syncManager.startDiscovery()
                         screenState = ScreenState.DiscoveringSession
                     },
+
                     onLoadDifferentPdfClicked = { filePickerLauncher.launch(arrayOf("application/pdf")) }
                 )
             }
