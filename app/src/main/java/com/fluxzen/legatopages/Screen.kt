@@ -53,7 +53,7 @@ fun MainScreen() {
     fun updateStateAndSavePdf(uri: Uri, isLocal: Boolean) {
         val fileHash = syncManager.getCurrentFileHash()
         val pageToLoad = fileHash?.let { syncManager.getLastViewedPage(it) } ?: 0
-        
+
         val newScreenState = ScreenState.PdfViewer(
             pdfUri = uri,
             bookPage = pageToLoad,
@@ -123,14 +123,14 @@ fun MainScreen() {
         }
     }
 
-    val permissionsList = remember { 
+    val permissionsList = remember {
         listOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.BLUETOOTH_SCAN,
             Manifest.permission.BLUETOOTH_ADVERTISE,
             Manifest.permission.BLUETOOTH_CONNECT,
-            Manifest.permission.NEARBY_WIFI_DEVICES 
-        ).distinct() 
+            Manifest.permission.NEARBY_WIFI_DEVICES
+        ).distinct()
     }
 
     val permissionState = rememberMultiplePermissionsState(permissionsList) { permissionsResult ->
@@ -144,7 +144,7 @@ fun MainScreen() {
 
     LaunchedEffect(key1 = permissionState.allPermissionsGranted) {
         if (permissionState.allPermissionsGranted) {
-            if (screenState is ScreenState.Permission) { 
+            if (screenState is ScreenState.Permission) {
                 val lastPosition = pdfPreferences.getLastPosition()
                 if (lastPosition != null && lastPosition.uri.toString().isNotEmpty()) {
                     var uriAccessible = false
@@ -160,9 +160,9 @@ fun MainScreen() {
                         screenState = ScreenState.PdfViewer(
                             pdfUri = lastPosition.uri,
                             bookPage = lastPosition.bookPage,
-                            isActuallyLeading = false, 
+                            isActuallyLeading = false,
                             statusText = if (syncLoadSuccess) "Loaded last viewed PDF." else "Loaded last PDF. Sync features might be limited.",
-                            isLocalViewingOnly = !syncLoadSuccess 
+                            isLocalViewingOnly = !syncLoadSuccess
                         )
                         statusTextState = (screenState as ScreenState.PdfViewer).statusText
                     } else {
@@ -176,7 +176,7 @@ fun MainScreen() {
             }
         } else {
             if (screenState is ScreenState.Permission) {
-                 permissionState.launchMultiplePermissionRequest()
+                permissionState.launchMultiplePermissionRequest()
             }
         }
     }
@@ -191,10 +191,10 @@ fun MainScreen() {
                     statusTextState = "Failed to load PDF."
                 }
             } else {
-                 statusTextState = "PDF selection cancelled."
-                 if (screenState !is ScreenState.PdfViewer) {
+                statusTextState = "PDF selection cancelled."
+                if (screenState !is ScreenState.PdfViewer) {
                     screenState = ScreenState.SelectPdfToLoadOrDiscover
-                 }
+                }
             }
         }
     )
@@ -202,15 +202,15 @@ fun MainScreen() {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .safeDrawingPadding() 
+            .safeDrawingPadding()
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        
+
         if (statusTextState.isNotEmpty() && screenState !is ScreenState.PdfViewer) {
-             Text(statusTextState, style = MaterialTheme.typography.titleSmall, textAlign = TextAlign.Center)
-             Spacer(Modifier.height(8.dp))
+            Text(statusTextState, style = MaterialTheme.typography.titleSmall, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(8.dp))
         }
 
         when (val state = screenState) {
@@ -248,46 +248,31 @@ fun MainScreen() {
                 }
             }
             is ScreenState.PdfViewer -> {
-                Column(modifier=Modifier.fillMaxSize()){
-                    Box(modifier = Modifier.weight(1f)){
-                        PdfViewerScreen(
-                            pdfUri = state.pdfUri,
-                            bookPage = state.bookPage,
-                            deviceArrangement = deviceArrangement,
-                            onTurnPage = { newBookPage ->
-                                 (screenState as? ScreenState.PdfViewer)?.let { 
-                                    screenState = it.copy(bookPage = newBookPage)
-                                    pdfPreferences.saveLastPosition(it.pdfUri, newBookPage)
-                                }
-                                if(state.isActuallyLeading) {
-                                    syncManager.broadcastPageTurn(PageTurn(newBookPage))
-                                }
-                            },
-                            statusText = state.statusText, 
-                            onStartSessionClicked = { },
-                            isLeader = state.isActuallyLeading
-                        )
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly){
-                        if (state.isLocalViewingOnly) { 
-                            Button(onClick = { syncManager.startLeadingSession() }) { Text("Start Leading") }
-                            Button(onClick = {
-                                syncManager.startDiscovery()
-                                screenState = ScreenState.DiscoveringSession
-                            }) { Text("Find Other Session") }
-                            Button(onClick = { filePickerLauncher.launch(arrayOf("application/pdf")) }) {Text("Load Different PDF")}
-                        } else if (state.isActuallyLeading) { 
-                            Button(onClick = {
-                                syncManager.stopLeading()
-                            }) { Text("Stop Leading") }
-                        } else { 
-                            Button(onClick = {
-                                syncManager.leaveSession()
-                            }) { Text("Leave Session") }
+                PdfViewerScreen(
+                    pdfUri = state.pdfUri,
+                    bookPage = state.bookPage,
+                    deviceArrangement = deviceArrangement,
+                    onTurnPage = { newBookPage ->
+                        (screenState as? ScreenState.PdfViewer)?.let {
+                            screenState = it.copy(bookPage = newBookPage)
+                            pdfPreferences.saveLastPosition(it.pdfUri, newBookPage)
                         }
-                    }
-                }
+                        if (state.isActuallyLeading) {
+                            syncManager.broadcastPageTurn(PageTurn(newBookPage))
+                        }
+                    },
+                    statusText = state.statusText,
+                    isLeader = state.isActuallyLeading,
+                    isLocalViewingOnly = state.isLocalViewingOnly,
+                    onStartLeadingClicked = { syncManager.startLeadingSession() },
+                    onStopLeadingClicked = { syncManager.stopLeading() },
+                    onLeaveSessionClicked = { syncManager.leaveSession() },
+                    onFindSessionClicked = {
+                        syncManager.startDiscovery()
+                        screenState = ScreenState.DiscoveringSession
+                    },
+                    onLoadDifferentPdfClicked = { filePickerLauncher.launch(arrayOf("application/pdf")) }
+                )
             }
         }
     }
