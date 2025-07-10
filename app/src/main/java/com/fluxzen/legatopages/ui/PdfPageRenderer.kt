@@ -27,12 +27,12 @@ class PdfPageRenderer(context: Context, private val pdfUri: Uri) {
         get() = _pageCount
 
     init {
-        var tempPfd: ParcelFileDescriptor? = null // Use a temporary variable for PFD
+        var tempPfd: ParcelFileDescriptor? = null 
         try {
             tempPfd = context.contentResolver.openFileDescriptor(pdfUri, "r")
-            tempPfd?.use { pfd -> // 'use' guarantees closure unless ownership is transferred
-                pdfRenderer = PdfRenderer(pfd) // PdfRenderer takes ownership of pfd if successful
-                parcelFileDescriptor = pfd // Only assign to member if PdfRenderer creation succeeds
+            tempPfd?.use { pfd -> 
+                pdfRenderer = PdfRenderer(pfd) 
+                parcelFileDescriptor = pfd 
                 _pageCount = pdfRenderer!!.pageCount
                 initializationOk = true
                 Log.d("PdfPageRenderer", "Successfully initialized for URI: $pdfUri, Page count: $_pageCount")
@@ -41,7 +41,7 @@ class PdfPageRenderer(context: Context, private val pdfUri: Uri) {
             }
         } catch (e: IOException) {
             Log.e("PdfPageRenderer", "IOException during PdfPageRenderer initialization for $pdfUri", e)
-            closeInternals() // This will reset class members
+            closeInternals() 
         } catch (e: SecurityException) {
             Log.e("PdfPageRenderer", "SecurityException during PdfPageRenderer initialization for $pdfUri", e)
             closeInternals()
@@ -49,8 +49,8 @@ class PdfPageRenderer(context: Context, private val pdfUri: Uri) {
             Log.e("PdfPageRenderer", "Unexpected error during PdfPageRenderer initialization for $pdfUri", e)
             closeInternals()
         }
-        // No explicit finally needed here for tempPfd, as 'use' handles its closure.
-        // If pdfRenderer successfully takes ownership, our close() method will eventually handle it.
+        
+        
     }
 
     suspend fun renderPage(pageIndex: Int, destSize: androidx.compose.ui.geometry.Size): Bitmap? {

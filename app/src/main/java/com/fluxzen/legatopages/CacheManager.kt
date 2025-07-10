@@ -39,13 +39,13 @@ class CacheManager(private val context: Context) {
                 tempFile.outputStream().use { outputStream ->
                     inputStream.copyTo(outputStream)
                 }
-                // Ensure this InputStream is closed
+                
                 tempFile.inputStream().use { hashInputStream ->
                     val hash = getFileHash(hashInputStream)
                     val finalFile = File(cacheDir, hash)
 
                     if (finalFile.exists()) {
-                        tempFile.delete() // Hash collision, file already cached.
+                        tempFile.delete() 
                     } else {
                         tempFile.renameTo(finalFile)
                     }

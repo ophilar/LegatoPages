@@ -1,10 +1,10 @@
 package com.fluxzen.legatopages
 
 import android.content.Context
-import android.content.SharedPreferences
+
 import android.net.Uri
 import android.util.Log
-import androidx.core.content.edit
+
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.*
 import com.google.gson.Gson
@@ -39,7 +39,9 @@ class SyncManager(private val context: Context) {
     private val strategy = Strategy.P2P_CLUSTER
     private val gson = Gson()
     private val cacheManager = CacheManager(context)
-    private val sharedPreferences: SharedPreferences = context.getSharedPreferences("LegatoPagesPrefs", Context.MODE_PRIVATE)
+    private val pdfPreferences = PdfPreferences(context) 
+
+    
 
     private var isLeader = false
     private var leaderEndpointId: String? = null
@@ -51,19 +53,25 @@ class SyncManager(private val context: Context) {
     private val completedFilePayloads = mutableMapOf<Long, File>()
     private val pendingConnections = mutableMapOf<String, String>()
 
+    /* 
     companion object {
         private const val LAST_PAGE_PREFIX = "last_page_"
     }
+    */
 
+    /* 
     private fun saveLastViewedPage(fileHash: String, page: Int) {
         sharedPreferences.edit {
             putInt(LAST_PAGE_PREFIX + fileHash, page)
         }
     }
+    */
 
+    /* 
     fun getLastViewedPage(fileHash: String): Int {
         return sharedPreferences.getInt(LAST_PAGE_PREFIX + fileHash, 0)
     }
+    */
 
     fun getCurrentFileHash(): String? {
         return currentFileInfo?.fileHash
@@ -109,11 +117,11 @@ class SyncManager(private val context: Context) {
             broadcastDeviceArrangement()
         }
     }
-    
+
     fun leaveSession() {
         if (!isLeader && leaderEndpointId != null) {
             connectionsClient.disconnectFromEndpoint(leaderEndpointId!!)
-            leaderEndpointId = null // Clear leaderEndpointId after disconnecting
+            leaderEndpointId = null 
             onStatusUpdate?.invoke("Leaving session...")
         } else {
             onStatusUpdate?.invoke("Not in a session or already leader.")
@@ -152,7 +160,7 @@ class SyncManager(private val context: Context) {
             } else if (update.status == PayloadTransferUpdate.Status.FAILURE || update.status == PayloadTransferUpdate.Status.CANCELED) {
                 Log.w("SyncManager", "Payload transfer not SUCCESS: ${update.status} for payload ID: ${update.payloadId}")
                 incomingFilePayloads.remove(update.payloadId)
-                completedFilePayloads.remove(update.payloadId) // Also remove if it was somehow completed then failed
+                completedFilePayloads.remove(update.payloadId)
                 onStatusUpdate?.invoke("File transfer failed.")
             } else {
                 Log.w("SyncManager", "Unhandled payload transfer update: ${update.status}")
@@ -163,9 +171,7 @@ class SyncManager(private val context: Context) {
     private fun handleBytePayload(endpointId: String, bytes: ByteArray) {
         val json = bytes.toString(StandardCharsets.UTF_8)
         val message = try {
-            // Ensure this reflects the actual structure if SyncMessage is an interface/sealed class
-            // For now, assuming direct deserialization works or SyncMessage itself is the target type.
-            gson.fromJson(json, SyncMessage::class.java) // Consider specific types if SyncMessage is a base
+            gson.fromJson(json, SyncMessage::class.java)
         } catch (e: Exception) {
             Log.e("SyncManager", "Error parsing SyncMessage JSON: $json", e)
             return
@@ -173,8 +179,8 @@ class SyncManager(private val context: Context) {
         when (message) {
             is SyncMessage.FileInfo -> {
                 onStatusUpdate?.invoke("Received file info: ${message.fileName}")
-                this.currentFileInfo = message 
-                val cachedFile = cacheManager.getCachedFile(message.fileName, message.fileHash)
+                this.currentFileInfo = message
+                val cachedFile = cacheManager.getCachedFile(message.fileHash) 
                 if (cachedFile != null) {
                     onStatusUpdate?.invoke("File found in cache.")
                     onFileReceived?.invoke(cachedFile)
@@ -184,7 +190,7 @@ class SyncManager(private val context: Context) {
                 }
             }
             is SyncMessage.FileRequest -> {
-                if (!isLeader) return 
+                if (!isLeader) return
                 val fileUri = currentFileUri ?: return
                 try {
                     context.contentResolver.openFileDescriptor(fileUri, "r")?.use { pfd ->
@@ -221,14 +227,13 @@ class SyncManager(private val context: Context) {
                     onFollowerJoined?.invoke(newDevice)
                     broadcastDeviceArrangement()
                     currentFileInfo?.let { info ->
-                        sendMessage(endpointId, info) 
+                        sendMessage(endpointId, info)
                         
-                        val currentPageForLeader = getLastViewedPage(info.fileHash)
+                        val currentPageForLeader = pdfPreferences.getPageForFile(info.fileHash)
                         sendMessage(endpointId, SyncMessage.PageChanged(currentPageForLeader))
                     }
                 } else {
-                    // This device is a follower and successfully connected to a leader
-                    connectionsClient.stopDiscovery() // Stop discovering other leaders
+                    connectionsClient.stopDiscovery()
                     leaderEndpointId = endpointId
                     onLeaderFound?.invoke(endpointId)
                 }
@@ -238,7 +243,6 @@ class SyncManager(private val context: Context) {
                 if (isLeader) {
                     broadcastDeviceArrangement()
                 } else if (endpointId == leaderEndpointId) {
-                    // If connection to the intended leader failed, clear leaderEndpointId
                     leaderEndpointId = null
                 }
             }
@@ -252,18 +256,18 @@ class SyncManager(private val context: Context) {
 
             if (isLeader) {
                 broadcastDeviceArrangement()
-            } else if (endpointId == leaderEndpointId) { 
+            } else if (endpointId == leaderEndpointId) {
                 leaderEndpointId = null
                 onStatusUpdate?.invoke("Leader disconnected. Searching for new leader...")
-                onDisconnectedFromLeader?.invoke() 
-                startDiscovery() 
+                onDisconnectedFromLeader?.invoke()
+                startDiscovery()
             }
         }
     }
 
-    private fun startAdvertising() { 
-        connectionsClient.stopDiscovery() // Stop discovery before advertising
-        isLeader = true 
+    private fun startAdvertising() {
+        connectionsClient.stopDiscovery()
+        isLeader = true
         val advertisingOptions = AdvertisingOptions.Builder().setStrategy(strategy).build()
         connectionsClient.startAdvertising(
             "LeaderDevice", serviceId, connectionLifecycleCallback, advertisingOptions
@@ -272,13 +276,13 @@ class SyncManager(private val context: Context) {
             onAdvertisingStarted?.invoke()
         }.addOnFailureListener { e ->
             onStatusUpdate?.invoke("Advertising failed: ${e.message}")
-            isLeader = false 
+            isLeader = false
             onAdvertisingFailed?.invoke()
         }
     }
 
     fun startDiscovery() {
-        connectionsClient.stopAdvertising() // Stop advertising before discovering
+        connectionsClient.stopAdvertising()
         isLeader = false
         leaderEndpointId = null
         val discoveryOptions = DiscoveryOptions.Builder().setStrategy(strategy).build()
@@ -286,25 +290,22 @@ class SyncManager(private val context: Context) {
             serviceId, object : EndpointDiscoveryCallback() {
                 override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
                     onStatusUpdate?.invoke("Found leader: ${info.endpointName}. Connecting...")
-                    // Do not stop discovery here, let onConnectionResult handle it
                     connectionsClient.requestConnection("FollowerDevice", endpointId, connectionLifecycleCallback)
                         .addOnFailureListener { e ->
                             onStatusUpdate?.invoke("Connection request to ${info.endpointName} failed: ${e.message}. Restarting discovery might be needed if no other leaders are found.")
-                            // Optionally, restart discovery if connection fails and no other leader is pending
-                            // For now, relying on the timeout or manual retry.
                         }
                 }
-                override fun onEndpointLost(endpointId: String) { 
+                override fun onEndpointLost(endpointId: String) {
                     onStatusUpdate?.invoke("Leader ${endpointId} lost during discovery.")
                 }
             }, discoveryOptions
         ).addOnSuccessListener {
             onStatusUpdate?.invoke("Searching for a leader...")
             android.os.Handler(context.mainLooper).postDelayed({
-                if (leaderEndpointId == null && !isLeader) { // Check if not connected and not a leader
+                if (leaderEndpointId == null && !isLeader) {
                     onNoLeaderFound?.invoke()
                 }
-            }, 10000) // 10 seconds timeout for finding a leader
+            }, 10000) 
         }.addOnFailureListener { e ->
             onStatusUpdate?.invoke("Discovery failed to start: ${e.message}")
             onNoLeaderFound?.invoke()
@@ -319,17 +320,18 @@ class SyncManager(private val context: Context) {
     fun broadcastPageTurn(pageTurn: PageTurn) {
         if (isLeader) {
             currentFileInfo?.let {
-                saveLastViewedPage(it.fileHash, pageTurn.bookPage)
+                
+                pdfPreferences.savePageForFile(it.fileHash, pageTurn.bookPage)
             }
             sendMessageToAll(SyncMessage.PageChanged(pageTurn.bookPage))
-        } else { 
+        } else {
             leaderEndpointId?.let { sendMessage(it, SyncMessage.PageChanged(pageTurn.bookPage)) }
         }
     }
 
     private fun broadcastDeviceArrangement() {
         if (!isLeader) return
-        val selfDeviceName = "This Device (Leader)" 
+        val selfDeviceName = "This Device (Leader)"
         val allDevices = mutableListOf(Device("leader_self_id", selfDeviceName, isLeader = true, isThisDevice = true))
         allDevices.addAll(connectedEndpoints.map { Device(it.endpointId, it.deviceName, isLeader = false, isThisDevice = false) })
         val message = SyncMessage.ArrangementUpdate(allDevices)
@@ -354,7 +356,7 @@ class SyncManager(private val context: Context) {
         if (isLeader) {
             connectionsClient.stopAdvertising()
         }
-        connectionsClient.stopDiscovery() 
+        connectionsClient.stopDiscovery()
         connectionsClient.stopAllEndpoints()
         connectedEndpoints.clear()
         isLeader = false
