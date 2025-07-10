@@ -13,16 +13,40 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,6 +65,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.fluxzen.legatopages.Device
+import com.fluxzen.legatopages.PageTurnDirection
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -51,7 +76,8 @@ fun PdfViewerScreen(
     pdfUri: Uri,
     bookPage: Int,
     deviceArrangement: List<Device>,
-    onTurnPage: (Int) -> Unit,
+    onTurnPage: (PageTurnDirection) -> Unit,
+    onGoToPage: (Int) -> Unit,
     statusText: String,
     isLeader: Boolean,
     isLocalViewingOnly: Boolean,
@@ -80,19 +106,23 @@ fun PdfViewerScreen(
     val currentBookPage by rememberUpdatedState(bookPage)
     val currentOnTurnPage by rememberUpdatedState(onTurnPage)
     val currentDeviceArrangement by rememberUpdatedState(deviceArrangement)
-    val currentIsLeader by rememberUpdatedState(isLeader)
 
-    val (thisDeviceIndex, totalDevices) = if (isLocalViewingOnly) {
+    val (thisDeviceIndex, _) = if (isLocalViewingOnly) {
         0 to 1
     } else {
-        (if (currentIsLeader) 0 else currentDeviceArrangement.indexOfFirst { !it.isLeader }.takeIf { it != -1 } ?: 0) to currentDeviceArrangement.size.coerceAtLeast(1)
+        val index =
+            currentDeviceArrangement.indexOfFirst { it.isThisDevice }.takeIf { it != -1 } ?: 0
+        val count = currentDeviceArrangement.size.coerceAtLeast(1)
+        index to count
     }
+
     val actualPageIndex = currentBookPage + thisDeviceIndex
 
     val viewConfiguration = LocalViewConfiguration.current
     val density = LocalDensity.current
     val coroutineScope = rememberCoroutineScope()
     var hideControlsJob by remember { mutableStateOf<Job?>(null) }
+    val isFollower = !isLocalViewingOnly && !isLeader
 
     fun scheduleHideControls() {
         hideControlsJob?.cancel()
@@ -126,17 +156,17 @@ fun PdfViewerScreen(
     }
 
     fun turnPageNext() {
-        val newBookPage = currentBookPage + totalDevices
-        if ((newBookPage + thisDeviceIndex) < renderer.pageCount) {
-            currentOnTurnPage(newBookPage)
-            scale = 1f
-            offset = Offset.Zero
-        }
+//        val newBookPage = currentBookPage + totalDevices
+//        if ((newBookPage + thisDeviceIndex) < renderer.pageCount) {
+        currentOnTurnPage(PageTurnDirection.NEXT)
+        scale = 1f
+        offset = Offset.Zero
+//        }
     }
 
     fun turnPagePrevious() {
-        val newBookPage = (currentBookPage - totalDevices).coerceAtLeast(0)
-        currentOnTurnPage(newBookPage)
+//        val newBookPage = (currentBookPage - totalDevices).coerceAtLeast(0)
+        currentOnTurnPage(PageTurnDirection.PREVIOUS)
         scale = 1f
         offset = Offset.Zero
     }
@@ -147,7 +177,10 @@ fun PdfViewerScreen(
         containerColor = Color.Black.copy(alpha = 0.6f),
         contentColor = Color.White
     )
-    val permanentControlAlpha by animateFloatAsState(targetValue = if (controlsVisible) 0.7f else 0.3f, label = "PermanentControlAlpha")
+    val permanentControlAlpha by animateFloatAsState(
+        targetValue = if (controlsVisible) 0.7f else 0.3f,
+        label = "PermanentControlAlpha"
+    )
 
     Box(
         modifier = Modifier
@@ -233,13 +266,18 @@ fun PdfViewerScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                 IconButton(
+                IconButton(
                     onClick = ::turnPagePrevious,
                     modifier = Modifier
                         .background(Color.Black.copy(alpha = permanentControlAlpha), CircleShape)
                         .alpha(permanentControlAlpha)
                 ) {
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Previous Page", tint = Color.White, modifier = Modifier.size(48.dp))
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                        contentDescription = "Previous Page",
+                        tint = Color.White,
+                        modifier = Modifier.size(48.dp)
+                    )
                 }
 
                 AnimatedVisibility(
@@ -250,17 +288,34 @@ fun PdfViewerScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         when {
                             isLocalViewingOnly -> {
-                                Button(onClick = onStartLeadingClicked, colors = transparentButtonColors) { Text("Start Leading") }
-                                Button(onClick = onFindSessionClicked, colors = transparentButtonColors) { Text("Find Session") }
+                                Button(
+                                    onClick = onStartLeadingClicked,
+                                    colors = transparentButtonColors
+                                ) { Text("Start Leading") }
+                                Button(
+                                    onClick = onFindSessionClicked,
+                                    colors = transparentButtonColors
+                                ) { Text("Find Session") }
                             }
+
                             isLeader -> {
-                                Button(onClick = onStopLeadingClicked, colors = transparentButtonColors) { Text("Stop Leading") }
+                                Button(
+                                    onClick = onStopLeadingClicked,
+                                    colors = transparentButtonColors
+                                ) { Text("Stop Leading") }
                             }
+
                             else -> {
-                                Button(onClick = onLeaveSessionClicked, colors = transparentButtonColors) { Text("Leave Session") }
+                                Button(
+                                    onClick = onLeaveSessionClicked,
+                                    colors = transparentButtonColors
+                                ) { Text("Leave Session") }
                             }
                         }
-                        Button(onClick = onLoadDifferentPdfClicked, colors = transparentButtonColors) { Text("Load New") }
+                        Button(
+                            onClick = onLoadDifferentPdfClicked,
+                            colors = transparentButtonColors
+                        ) { Text("Load New") }
                     }
                 }
 
@@ -270,7 +325,12 @@ fun PdfViewerScreen(
                         .background(Color.Black.copy(alpha = permanentControlAlpha), CircleShape)
                         .alpha(permanentControlAlpha)
                 ) {
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Next Page", tint = Color.White, modifier = Modifier.size(48.dp))
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "Next Page",
+                        tint = Color.White,
+                        modifier = Modifier.size(48.dp)
+                    )
                 }
             }
 
@@ -298,7 +358,11 @@ fun PdfViewerScreen(
                     color = Color.White,
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier
-                        .clickable { showPageDialog = true }
+                        .clickable(enabled = !isFollower) {
+                            if (!isFollower) {
+                                showPageDialog = true
+                            }
+                        }
                         .padding(start = 4.dp)
                 )
             }
@@ -309,7 +373,7 @@ fun PdfViewerScreen(
                 totalPages = renderer.pageCount,
                 onDismiss = { showPageDialog = false },
                 onConfirm = { page ->
-                    onTurnPage(page - 1) 
+                    onGoToPage(page - 1)
                     showPageDialog = false
                 }
             )

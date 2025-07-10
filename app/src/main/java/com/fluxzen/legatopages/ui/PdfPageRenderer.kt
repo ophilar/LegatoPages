@@ -33,19 +33,37 @@ class PdfPageRenderer(context: Context, private val pdfUri: Uri) {
                 pdfRenderer = PdfRenderer(parcelFileDescriptor!!)
                 _pageCount = pdfRenderer!!.pageCount
                 initializationOk = true
-                Log.d("PdfPageRenderer", "Successfully initialized for URI: $pdfUri, Page count: $_pageCount")
+                Log.d(
+                    "PdfPageRenderer",
+                    "Successfully initialized for URI: $pdfUri, Page count: $_pageCount"
+                )
             } else {
-                Log.w("PdfPageRenderer", "Failed to open ParcelFileDescriptor for URI: $pdfUri. URI might be invalid or file not accessible.")
+                Log.w(
+                    "PdfPageRenderer",
+                    "Failed to open ParcelFileDescriptor for URI: $pdfUri. URI might be invalid or file not accessible."
+                )
                 initializationOk = false
             }
         } catch (e: IOException) {
-            Log.e("PdfPageRenderer", "IOException during PdfPageRenderer initialization for $pdfUri", e)
-            closeInternals() 
+            Log.e(
+                "PdfPageRenderer",
+                "IOException during PdfPageRenderer initialization for $pdfUri",
+                e
+            )
+            closeInternals()
         } catch (e: SecurityException) {
-            Log.e("PdfPageRenderer", "SecurityException during PdfPageRenderer initialization for $pdfUri", e)
+            Log.e(
+                "PdfPageRenderer",
+                "SecurityException during PdfPageRenderer initialization for $pdfUri",
+                e
+            )
             closeInternals()
         } catch (e: Exception) {
-            Log.e("PdfPageRenderer", "Unexpected error during PdfPageRenderer initialization for $pdfUri", e)
+            Log.e(
+                "PdfPageRenderer",
+                "Unexpected error during PdfPageRenderer initialization for $pdfUri",
+                e
+            )
             closeInternals()
         }
     }
@@ -62,7 +80,10 @@ class PdfPageRenderer(context: Context, private val pdfUri: Uri) {
                     return@withContext null
                 }
                 if (pageIndex < 0 || pageIndex >= _pageCount) {
-                    Log.w("PdfPageRenderer", "renderPage called with invalid pageIndex: $pageIndex (pageCount: $_pageCount).")
+                    Log.w(
+                        "PdfPageRenderer",
+                        "renderPage called with invalid pageIndex: $pageIndex (pageCount: $_pageCount)."
+                    )
                     return@withContext null
                 }
 
@@ -71,7 +92,10 @@ class PdfPageRenderer(context: Context, private val pdfUri: Uri) {
                 try {
                     currentRenderer.openPage(pageIndex).use { page ->
                         if (page.width <= 0 || page.height <= 0) {
-                            Log.e("PdfPageRenderer", "Page $pageIndex has invalid dimensions: ${page.width}x${page.height}")
+                            Log.e(
+                                "PdfPageRenderer",
+                                "Page $pageIndex has invalid dimensions: ${page.width}x${page.height}"
+                            )
                             return@withContext null
                         }
 
@@ -81,19 +105,26 @@ class PdfPageRenderer(context: Context, private val pdfUri: Uri) {
                         )
 
                         if (scale <= 0f) {
-                            Log.e("PdfPageRenderer", "Calculated scale is non-positive: $scale. DestSize: ${destSize.width}x${destSize.height}, Page: ${page.width}x${page.height}")
+                            Log.e(
+                                "PdfPageRenderer",
+                                "Calculated scale is non-positive: $scale. DestSize: ${destSize.width}x${destSize.height}, Page: ${page.width}x${page.height}"
+                            )
                             return@withContext null
-                        } 
+                        }
 
                         val bitmapWidth = (page.width * scale).toInt()
                         val bitmapHeight = (page.height * scale).toInt()
 
                         if (bitmapWidth <= 0 || bitmapHeight <= 0) {
-                            Log.e("PdfPageRenderer", "Calculated bitmap dimensions are invalid: ${bitmapWidth}x$bitmapHeight. Scale: $scale")
+                            Log.e(
+                                "PdfPageRenderer",
+                                "Calculated bitmap dimensions are invalid: ${bitmapWidth}x$bitmapHeight. Scale: $scale"
+                            )
                             return@withContext null
                         }
 
-                        val bitmap = createBitmap(bitmapWidth, bitmapHeight, Bitmap.Config.ARGB_8888)
+                        val bitmap =
+                            createBitmap(bitmapWidth, bitmapHeight, Bitmap.Config.ARGB_8888)
                         val matrix = Matrix().apply {
                             postScale(scale, scale)
                         }
@@ -107,12 +138,15 @@ class PdfPageRenderer(context: Context, private val pdfUri: Uri) {
                     null
                 }
             }
-        } 
-    } 
+        }
+    }
 
     private fun closeInternals() {
         if (parcelFileDescriptor != null || pdfRenderer != null || initializationOk) {
-            Log.d("PdfPageRenderer", "Closing PdfPageRenderer internals. Initialized: $initializationOk")
+            Log.d(
+                "PdfPageRenderer",
+                "Closing PdfPageRenderer internals. Initialized: $initializationOk"
+            )
         }
         try {
             pdfRenderer?.close()

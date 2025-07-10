@@ -13,7 +13,6 @@ import java.io.InputStream
 import java.math.BigInteger
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
-import kotlin.let
 
 class CacheManager(private val context: Context) {
 
@@ -39,13 +38,13 @@ class CacheManager(private val context: Context) {
                 tempFile.outputStream().use { outputStream ->
                     inputStream.copyTo(outputStream)
                 }
-                
+
                 tempFile.inputStream().use { hashInputStream ->
                     val hash = getFileHash(hashInputStream)
                     val finalFile = File(cacheDir, hash)
 
                     if (finalFile.exists()) {
-                        tempFile.delete() 
+                        tempFile.delete()
                     } else {
                         tempFile.renameTo(finalFile)
                     }
@@ -64,17 +63,17 @@ class CacheManager(private val context: Context) {
             when (payload.type) {
                 Payload.Type.FILE -> {
                     payload.asFile()?.let { payloadFile ->
-                        
+
                         if (!cacheDir.exists()) {
-                            cacheDir.mkdirs() 
+                            cacheDir.mkdirs()
                         }
-                        
-                        
+
+
                         val tempFileName = "received_payload_${payload.id}.tmp"
                         val cachedFile = File(cacheDir, tempFileName)
 
                         try {
-                            
+
                             payloadFile.asParcelFileDescriptor().use { pfd ->
                                 FileInputStream(pfd.fileDescriptor).use { inputStream ->
                                     FileOutputStream(cachedFile).use { outputStream ->
@@ -90,7 +89,7 @@ class CacheManager(private val context: Context) {
                             return cachedFile
                         } catch (e: IOException) {
                             Log.e("CacheManager", "Error copying file from payload to cache", e)
-                            
+
                             if (cachedFile.exists()) {
                                 cachedFile.delete()
                             }
@@ -99,9 +98,8 @@ class CacheManager(private val context: Context) {
                 }
 
                 Payload.Type.STREAM -> {
-                    
-                    
-                    
+
+
                     Log.d("CacheManager", "Handling stream payload ID: ${payload.id}")
                     val tempFileName = "received_stream_${payload.id}.tmp"
                     val cachedFile = File(cacheDir, tempFileName)
@@ -135,7 +133,7 @@ class CacheManager(private val context: Context) {
                         "CacheManager",
                         "BYTES payload received in saveReceivedFile. This method is intended for FILE or STREAM payloads."
                     )
-                    
+
                 }
 
                 else -> Log.w("CacheManager", "Unhandled payload type: ${payload.type}")
@@ -160,7 +158,7 @@ class CacheManager(private val context: Context) {
         val file = File(cacheDir, fileName)
         if (!file.exists()) return null
 
-        
+
         try {
             file.inputStream().use {
                 if (getFileHash(it) == expectedHash) {
@@ -170,7 +168,7 @@ class CacheManager(private val context: Context) {
             }
         } catch (e: IOException) {
             Log.e("CacheManager", "Error reading cached file for hashing: ${file.name}", e)
-            return null 
+            return null
         }
         return null
     }

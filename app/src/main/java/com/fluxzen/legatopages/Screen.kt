@@ -6,12 +6,24 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -35,10 +47,14 @@ sealed class ScreenState {
         var isActuallyLeading: Boolean,
         override val statusText: String,
         val fileHash: String,
-        val isLocalViewingOnly: Boolean = false
+        val isLocalViewingOnly: Boolean = false,
     ) : ScreenState()
 }
 
+enum class PageTurnDirection {
+    NEXT,
+    PREVIOUS
+}
 
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
 @OptIn(ExperimentalPermissionsApi::class)
@@ -72,16 +88,36 @@ fun MainScreen() {
         screenState = newScreenState
 
         pdfPreferences.savePageForFile(fileHash, pageToLoad)
-        
-        
-        
-        
     }
 
+    fun executePageTurn(direction: PageTurnDirection) {
+        (screenState as? ScreenState.PdfViewer)?.let { state ->
+            // A device can only execute a page turn if it's not a follower.
+            if (!state.isLocalViewingOnly && !state.isActuallyLeading) return
+
+            val totalDevices =
+                if (state.isLocalViewingOnly) 1 else deviceArrangement.size.coerceAtLeast(1)
+            val newBookPage = when (direction) {
+                PageTurnDirection.NEXT -> state.bookPage + totalDevices
+                PageTurnDirection.PREVIOUS -> (state.bookPage - totalDevices).coerceAtLeast(0)
+            }
+
+            // Update the local UI state.
+            screenState = state.copy(bookPage = newBookPage)
+            pdfPreferences.savePageForFile(state.fileHash, newBookPage)
+
+            // If it's a leader, broadcast the result to all followers.
+            if (state.isActuallyLeading) {
+                syncManager.broadcastPageTurn(PageTurn(newBookPage))
+            }
+        }
+    }
     LaunchedEffect(syncManager) {
+        syncManager.onTurnRequestReceived = { direction ->
+            executePageTurn(direction)
+        }
         syncManager.onPageTurnReceived = { pageTurn ->
             (screenState as? ScreenState.PdfViewer)?.let {
-                
                 screenState = it.copy(bookPage = pageTurn.bookPage)
                 pdfPreferences.savePageForFile(it.fileHash, pageTurn.bookPage)
             }
@@ -109,7 +145,8 @@ fun MainScreen() {
             ) ?: ScreenState.DiscoveringSession("Connected to leader. Waiting for file...")
         }
         syncManager.onNoLeaderFound = {
-            screenState = ScreenState.SelectPdfToLoadOrDiscover("No leader found. Load a PDF to start your own session.")
+            screenState =
+                ScreenState.SelectPdfToLoadOrDiscover("No leader found. Load a PDF to start your own session.")
         }
         syncManager.onDisconnectedFromLeader = {
             screenState = ScreenState.SelectPdfToLoadOrDiscover("Disconnected from leader.")
@@ -157,7 +194,8 @@ fun MainScreen() {
     val permissionState = rememberMultiplePermissionsState(permissionsList) { permissionsResult ->
         if (!permissionsResult.all { it.value }) {
             if (screenState !is ScreenState.Permission) {
-                screenState = ScreenState.Permission("Permissions required to use the app. Please grant all permissions to continue.")
+                screenState =
+                    ScreenState.Permission("Permissions required to use the app. Please grant all permissions to continue.")
             }
         }
     }
@@ -183,12 +221,13 @@ fun MainScreen() {
                             isLocalViewingOnly = true
                         )
                     } else {
-
                         pdfPreferences.clearPageForFile(lastFileHash)
-                        screenState = ScreenState.SelectPdfToLoadOrDiscover("Last PDF not found. Please select a PDF.")
+                        screenState =
+                            ScreenState.SelectPdfToLoadOrDiscover("Last PDF not found. Please select a PDF.")
                     }
                 } else {
-                    screenState = ScreenState.SelectPdfToLoadOrDiscover("Permissions granted. Load a PDF or find a session.")
+                    screenState =
+                        ScreenState.SelectPdfToLoadOrDiscover("Permissions granted. Load a PDF or find a session.")
                 }
             }
         } else {
@@ -205,18 +244,17 @@ fun MainScreen() {
                 val cachedResult = cacheManager.cacheFileFromUri(uri)
                 if (cachedResult != null) {
                     val (_, file) = cachedResult
-
                     if (syncManager.loadFile(Uri.fromFile(file))) {
                         updateStateAndSavePdf(file, isLocal = true)
                     } else {
-                        
-                        screenState = (screenState as? ScreenState.PdfViewer)?.copy(statusText = "Failed to load PDF.")
-                            ?: ScreenState.SelectPdfToLoadOrDiscover("Failed to load PDF.")
+                        screenState =
+                            (screenState as? ScreenState.PdfViewer)?.copy(statusText = "Failed to load PDF.")
+                                ?: ScreenState.SelectPdfToLoadOrDiscover("Failed to load PDF.")
                     }
                 } else {
-                    
-                    screenState = (screenState as? ScreenState.PdfViewer)?.copy(statusText = "Failed to cache PDF.")
-                        ?: ScreenState.SelectPdfToLoadOrDiscover("Failed to cache PDF.")
+                    screenState =
+                        (screenState as? ScreenState.PdfViewer)?.copy(statusText = "Failed to cache PDF.")
+                            ?: ScreenState.SelectPdfToLoadOrDiscover("Failed to cache PDF.")
                 }
             } else {
                 val newStatus = "PDF selection cancelled."
@@ -237,9 +275,12 @@ fun MainScreen() {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-
         if (screenState.statusText.isNotEmpty() && screenState !is ScreenState.PdfViewer) {
-            Text(screenState.statusText, style = MaterialTheme.typography.titleSmall, textAlign = TextAlign.Center)
+            Text(
+                screenState.statusText,
+                style = MaterialTheme.typography.titleSmall,
+                textAlign = TextAlign.Center
+            )
             Spacer(Modifier.height(8.dp))
         }
 
@@ -247,8 +288,12 @@ fun MainScreen() {
             is ScreenState.Permission -> {
                 PermissionRequestScreen { permissionState.launchMultiplePermissionRequest() }
             }
+
             is ScreenState.SelectPdfToLoadOrDiscover -> {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(16.dp)) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(16.dp)
+                ) {
                     Text("Choose an action", style = MaterialTheme.typography.headlineSmall)
                     Spacer(Modifier.height(16.dp))
                     Button(onClick = { filePickerLauncher.launch(arrayOf("application/pdf")) }) {
@@ -257,40 +302,39 @@ fun MainScreen() {
                     Spacer(Modifier.height(8.dp))
                     Button(onClick = {
                         syncManager.startDiscovery()
-                        
+
                         screenState = ScreenState.DiscoveringSession("Searching for sessions...")
                     }) { Text("Find Existing Session") }
                 }
             }
+
             is ScreenState.DiscoveringSession -> {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    
+
                     Text(state.statusText, style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(16.dp))
                     CircularProgressIndicator()
                     Spacer(Modifier.height(32.dp))
                     Button(onClick = {
                         syncManager.stopDiscovery()
-                        
+
                         screenState = ScreenState.SelectPdfToLoadOrDiscover("Search cancelled.")
                     }) {
                         Text("Cancel Search")
                     }
                 }
             }
-            is ScreenState.PdfViewer -> {
 
+            is ScreenState.PdfViewer -> {
                 PdfViewerScreen(
                     pdfUri = state.pdfUri,
                     bookPage = state.bookPage,
                     deviceArrangement = deviceArrangement,
-                    onTurnPage = { newBookPage ->
-                        
-                        screenState = state.copy(bookPage = newBookPage)
-                        pdfPreferences.savePageForFile(state.fileHash, newBookPage)
-
-                        if (state.isActuallyLeading) {
-                            syncManager.broadcastPageTurn(PageTurn(newBookPage))
+                    onTurnPage = { direction ->
+                        if (state.isLocalViewingOnly || state.isActuallyLeading) {
+                            executePageTurn(direction)
+                        } else {
+                            syncManager.requestPageTurn(direction)
                         }
                     },
                     statusText = state.statusText,
@@ -301,10 +345,19 @@ fun MainScreen() {
                     onLeaveSessionClicked = { syncManager.leaveSession() },
                     onFindSessionClicked = {
                         syncManager.startDiscovery()
-                        
+
                         screenState = ScreenState.DiscoveringSession("Searching for sessions...")
                     },
-                    onLoadDifferentPdfClicked = { filePickerLauncher.launch(arrayOf("application/pdf")) }
+                    onLoadDifferentPdfClicked = { filePickerLauncher.launch(arrayOf("application/pdf")) },
+                    onGoToPage = { pageIndex ->
+                        if (state.isLocalViewingOnly || state.isActuallyLeading) {
+                            screenState = state.copy(bookPage = pageIndex)
+                            pdfPreferences.savePageForFile(state.fileHash, pageIndex)
+                            if (state.isActuallyLeading) {
+                                syncManager.broadcastPageTurn(PageTurn(pageIndex))
+                            }
+                        }
+                    }
                 )
             }
         }
@@ -324,7 +377,10 @@ fun PermissionRequestScreen(onGrantClicked: () -> Unit) {
         verticalArrangement = Arrangement.Center,
         modifier = Modifier.fillMaxSize()
     ) {
-        Text("Permissions are required to discover and connect to nearby devices, and access PDF files.", textAlign = TextAlign.Center)
+        Text(
+            "Permissions are required to discover and connect to nearby devices, and access PDF files.",
+            textAlign = TextAlign.Center
+        )
         Spacer(Modifier.height(16.dp))
         Button(onClick = onGrantClicked) {
             Text("Grant Permissions")
