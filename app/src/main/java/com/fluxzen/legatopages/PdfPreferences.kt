@@ -40,30 +40,12 @@ class PdfPreferences(context: Context) {
     }
 
     /**
-     * Clears all stored page positions and the last opened file hash.
-     * (Optional, but can be useful for debugging or a full reset)
-     */
-    fun clearAllPdfPreferences() {
-        prefs.edit {
-            
-            prefs.all.keys.filter { it.startsWith(PREFIX_PAGE_FOR_FILE) }.forEach { remove(it) }
-            
-            remove(KEY_LAST_OPENED_FILE_HASH)
-        }
-    }
-
-    /**
      * Clears the stored page position for a specific file.
      * (Optional, if you want to "forget" a file's position without clearing others)
      */
     fun clearPageForFile(fileHash: String) {
         prefs.edit {
             remove(PREFIX_PAGE_FOR_FILE + fileHash)
-            
-            
-            
-            
-            
         }
     }
 }

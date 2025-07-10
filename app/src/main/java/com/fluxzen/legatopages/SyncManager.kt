@@ -53,30 +53,6 @@ class SyncManager(private val context: Context) {
     private val completedFilePayloads = mutableMapOf<Long, File>()
     private val pendingConnections = mutableMapOf<String, String>()
 
-    /* 
-    companion object {
-        private const val LAST_PAGE_PREFIX = "last_page_"
-    }
-    */
-
-    /* 
-    private fun saveLastViewedPage(fileHash: String, page: Int) {
-        sharedPreferences.edit {
-            putInt(LAST_PAGE_PREFIX + fileHash, page)
-        }
-    }
-    */
-
-    /* 
-    fun getLastViewedPage(fileHash: String): Int {
-        return sharedPreferences.getInt(LAST_PAGE_PREFIX + fileHash, 0)
-    }
-    */
-
-    fun getCurrentFileHash(): String? {
-        return currentFileInfo?.fileHash
-    }
-
     fun loadFile(uri: Uri): Boolean {
         return try {
             this.currentFileUri = uri

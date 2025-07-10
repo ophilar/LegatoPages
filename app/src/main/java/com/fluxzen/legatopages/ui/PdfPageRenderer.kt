@@ -27,17 +27,16 @@ class PdfPageRenderer(context: Context, private val pdfUri: Uri) {
         get() = _pageCount
 
     init {
-        var tempPfd: ParcelFileDescriptor? = null 
         try {
-            tempPfd = context.contentResolver.openFileDescriptor(pdfUri, "r")
-            tempPfd?.use { pfd -> 
-                pdfRenderer = PdfRenderer(pfd) 
-                parcelFileDescriptor = pfd 
+            parcelFileDescriptor = context.contentResolver.openFileDescriptor(pdfUri, "r")
+            if (parcelFileDescriptor != null) {
+                pdfRenderer = PdfRenderer(parcelFileDescriptor!!)
                 _pageCount = pdfRenderer!!.pageCount
                 initializationOk = true
                 Log.d("PdfPageRenderer", "Successfully initialized for URI: $pdfUri, Page count: $_pageCount")
-            } ?: run {
+            } else {
                 Log.w("PdfPageRenderer", "Failed to open ParcelFileDescriptor for URI: $pdfUri. URI might be invalid or file not accessible.")
+                initializationOk = false
             }
         } catch (e: IOException) {
             Log.e("PdfPageRenderer", "IOException during PdfPageRenderer initialization for $pdfUri", e)
@@ -49,8 +48,6 @@ class PdfPageRenderer(context: Context, private val pdfUri: Uri) {
             Log.e("PdfPageRenderer", "Unexpected error during PdfPageRenderer initialization for $pdfUri", e)
             closeInternals()
         }
-        
-        
     }
 
     suspend fun renderPage(pageIndex: Int, destSize: androidx.compose.ui.geometry.Size): Bitmap? {
@@ -79,7 +76,7 @@ class PdfPageRenderer(context: Context, private val pdfUri: Uri) {
                         }
 
                         val scale = minOf(
-                            1080f / page.width,
+                            destSize.width / page.width,
                             destSize.height / page.height
                         )
 

@@ -309,7 +309,7 @@ fun PdfViewerScreen(
                 totalPages = renderer.pageCount,
                 onDismiss = { showPageDialog = false },
                 onConfirm = { page ->
-                    onTurnPage(page - 1) // Adjust to 0-based index for onTurnPage
+                    onTurnPage(page - 1) 
                     showPageDialog = false
                 }
             )
