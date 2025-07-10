@@ -29,7 +29,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.PointerEvent
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onSizeChanged
@@ -41,7 +40,6 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.fluxzen.legatopages.Device
 import kotlinx.coroutines.delay
-import kotlin.math.abs
 import kotlin.math.roundToInt
 
 @Composable
@@ -74,19 +72,26 @@ fun PdfViewerScreen(
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
 
-    val thisDeviceIndex = if (isLeader) 0 else deviceArrangement.indexOfFirst { !it.isLeader }.takeIf { it != -1 } ?: 0
-    val totalDevices = deviceArrangement.size.coerceAtLeast(1)
-    val actualPageIndex = bookPage + thisDeviceIndex
+    // --- START: Fix for stale state in gesture handler ---
+    val currentBookPage by rememberUpdatedState(bookPage)
+    val currentOnTurnPage by rememberUpdatedState(onTurnPage)
+    val currentDeviceArrangement by rememberUpdatedState(deviceArrangement)
+    val currentIsLeader by rememberUpdatedState(isLeader)
+    // --- END: Fix for stale state in gesture handler ---
+
+    val thisDeviceIndex = if (currentIsLeader) 0 else currentDeviceArrangement.indexOfFirst { !it.isLeader }.takeIf { it != -1 } ?: 0
+    val totalDevices = currentDeviceArrangement.size.coerceAtLeast(1)
+    val actualPageIndex = currentBookPage + thisDeviceIndex
 
     val viewConfiguration = LocalViewConfiguration.current
     val density = LocalDensity.current
 
     LaunchedEffect(renderer, actualPageIndex, pdfContainerSize) {
         pdfContainerSize?.let { validSize ->
-            if (actualPageIndex in 0 until renderer.pageCount) {
+            if (actualPageIndex >= 0 && actualPageIndex < renderer.pageCount) {
                 isLoading = true
                 val renderSize = with(density) {
-                    Size((validSize.width * 1.5f).roundToInt(), (validSize.height * 1.5f).roundToInt())
+                    Size((validSize.width * (scale * 1.5f)).roundToInt(), (validSize.height * (scale * 1.5f)).roundToInt())
                 }
                 bitmap = renderer.renderPage(actualPageIndex, renderSize)
                 isLoading = false
@@ -94,9 +99,10 @@ fun PdfViewerScreen(
                 bitmap = null
             }
         }
-        // Reset zoom and pan on page turn
-        scale = 1f
-        offset = Offset.Zero
+        if (!isLoading) { // Only reset zoom/pan if we are not in the middle of loading
+            scale = 1f
+            offset = Offset.Zero
+        }
     }
 
     LaunchedEffect(controlsVisible, lastInteractionTime) {
@@ -114,15 +120,17 @@ fun PdfViewerScreen(
     }
 
     fun turnPageNext() {
-        val newBookPage = bookPage + totalDevices
+        // Use the updated state reference
+        val newBookPage = currentBookPage + totalDevices
         if ((newBookPage + thisDeviceIndex) < renderer.pageCount) {
-            onTurnPage(newBookPage)
+            currentOnTurnPage(newBookPage)
         }
     }
 
     fun turnPagePrevious() {
-        val newBookPage = (bookPage - totalDevices).coerceAtLeast(0)
-        onTurnPage(newBookPage)
+        // Use the updated state reference
+        val newBookPage = (currentBookPage - totalDevices).coerceAtLeast(0)
+        currentOnTurnPage(newBookPage)
     }
 
     var showPageDialog by remember { mutableStateOf(false) }
@@ -136,14 +144,12 @@ fun PdfViewerScreen(
             }
             .pointerInput(Unit) {
                 awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    var dragOccurred = false
+                    awaitFirstDown(requireUnconsumed = false)
+                    var totalDrag = Offset.Zero
                     var zoomOccurred = false
-                    var lastEvent: PointerEvent?
 
                     do {
                         val event = awaitPointerEvent()
-                        lastEvent = event
                         if (event.changes.size > 1) {
                             zoomOccurred = true
                             val zoom = event.calculateZoom()
@@ -151,32 +157,25 @@ fun PdfViewerScreen(
                             scale = (scale * zoom).coerceIn(1f, 5f)
                             offset = if (scale > 1f) offset + pan else Offset.Zero
                         } else if (!zoomOccurred) {
-                            val drag = event.changes.firstOrNull()
-                            if (drag != null && drag.pressed) {
-                                if (drag.positionChange().getDistance() > viewConfiguration.touchSlop) {
-                                    dragOccurred = true
-                                }
-                            }
+                            val change = event.changes.first()
+                            totalDrag += change.positionChange()
                         }
-                        event.changes.forEach {
-                            if (it.pressed) {
-                                it.consume()
-                            }
-                        }
+                        event.changes.forEach { it.consume() } // Consume to prevent misinterpretation
                     } while (event.changes.any { it.pressed })
 
-                    if (dragOccurred && !zoomOccurred) {
-                        val lastChange = lastEvent.changes.first()
-                        val dragDistance = down.position - lastChange.position
-                        if (abs(dragDistance.x) > viewConfiguration.touchSlop * 2) {
-                           if (dragDistance.x > 0) {
-                               turnPageNext()
-                           } else {
-                               turnPagePrevious()
-                           }
+                    if (!zoomOccurred) {
+                        val dragThreshold = viewConfiguration.touchSlop
+                        if (totalDrag.getDistance() > dragThreshold) {
+                            // It's a swipe
+                            if (totalDrag.x < -dragThreshold) {
+                                turnPageNext()
+                            } else if (totalDrag.x > dragThreshold) {
+                                turnPagePrevious()
+                            }
+                        } else {
+                            // It's a tap
+                            showControlsAndResetTimer()
                         }
-                    } else if (!zoomOccurred) {
-                        showControlsAndResetTimer()
                     }
                 }
             }
@@ -206,7 +205,7 @@ fun PdfViewerScreen(
             )
         }
 
-        val buttonAlpha by animateFloatAsState(targetValue = if (controlsVisible) 1f else 0.2f, label = "Button Alpha")
+        val buttonAlpha by animateFloatAsState(targetValue = if (controlsVisible) 1f else 0f, label = "Button Alpha")
 
         Column(
             modifier = Modifier
@@ -222,7 +221,7 @@ fun PdfViewerScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = { turnPagePrevious(); showControlsAndResetTimer() }, modifier = Modifier.alpha(buttonAlpha)) {
+                IconButton(onClick = ::turnPagePrevious, modifier = Modifier.alpha(buttonAlpha)) {
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Previous Page", tint = Color.White, modifier = Modifier.size(48.dp))
                 }
 
@@ -244,7 +243,7 @@ fun PdfViewerScreen(
                     }
                 }
 
-                IconButton(onClick = { turnPageNext(); showControlsAndResetTimer() }, modifier = Modifier.alpha(buttonAlpha)) {
+                IconButton(onClick = ::turnPageNext, modifier = Modifier.alpha(buttonAlpha)) {
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Next Page", tint = Color.White, modifier = Modifier.size(48.dp))
                 }
             }
