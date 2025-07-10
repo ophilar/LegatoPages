@@ -1,30 +1,17 @@
 package com.fluxzen.legatopages
 
 import android.Manifest
-import android.content.Context
 import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -34,65 +21,163 @@ import com.fluxzen.legatopages.ui.PdfViewerScreen
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import java.io.File
-import java.io.FileOutputStream
+
+sealed class ScreenState {
+    object Permission : ScreenState()
+    object DiscoveringSession : ScreenState()
+    object SelectPdfToLoadOrDiscover : ScreenState()
+    data class PdfViewer(
+        val pdfUri: Uri,
+        val bookPage: Int,
+        var isActuallyLeading: Boolean,
+        val statusText: String,
+        val isLocalViewingOnly: Boolean = false
+    ) : ScreenState()
+}
 
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun MainScreen() {
-    var pdfUri by remember { mutableStateOf<Uri?>(null) }
-    var bookPage by remember { mutableIntStateOf(0) }
-    var thisDeviceIndex by remember { mutableIntStateOf(0) }
-    var totalDevices by remember { mutableIntStateOf(1) }
-    var statusText by remember { mutableStateOf("Not Connected") }
+    var screenState by remember { mutableStateOf<ScreenState>(ScreenState.Permission) }
+    var deviceArrangement by remember { mutableStateOf(listOf<Device>()) }
+    var statusTextState by remember { mutableStateOf("") }
 
     val context = LocalContext.current
-    val pdfPrefs = remember { PdfPreferences(context) }
-
-    LaunchedEffect(Unit) {
-        pdfPrefs.getLastPosition()?.let { lastPosition ->
-            pdfUri = lastPosition.uri
-            bookPage = lastPosition.bookPage
-        }
-    }
+    val pdfPreferences = remember { PdfPreferences(context.applicationContext) }
 
     val syncManager = remember(context.applicationContext) {
-        SyncManager(
-            context = context.applicationContext,
-            onPageTurnReceived = { pageTurn -> bookPage = pageTurn.bookPage },
-            onDeviceCountChanged = { count ->
-                totalDevices = count
-                thisDeviceIndex = 0
-            },
-            onStatusUpdate = { status -> statusText = status }
+        SyncManager(context.applicationContext)
+    }
+
+    fun updateStateAndSavePdf(uri: Uri, isLocal: Boolean) {
+        val fileHash = syncManager.getCurrentFileHash()
+        val pageToLoad = fileHash?.let { syncManager.getLastViewedPage(it) } ?: 0
+        
+        val newScreenState = ScreenState.PdfViewer(
+            pdfUri = uri,
+            bookPage = pageToLoad,
+            isActuallyLeading = false,
+            statusText = if (isLocal) "PDF loaded. Start leading or find a session." else "File received. Waiting for page sync...",
+            isLocalViewingOnly = isLocal
         )
+        screenState = newScreenState
+        pdfPreferences.saveLastPosition(newScreenState.pdfUri, newScreenState.bookPage)
+        if (isLocal) {
+            statusTextState = newScreenState.statusText
+        }
     }
 
-    val permissions = listOf(
-        Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_ADVERTISE,
-        Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.ACCESS_FINE_LOCATION,
-        Manifest.permission.NEARBY_WIFI_DEVICES,
-    )
-    val permissionState = rememberMultiplePermissionsState(permissions)
+    LaunchedEffect(syncManager) {
+        syncManager.onPageTurnReceived = { pageTurn ->
+            (screenState as? ScreenState.PdfViewer)?.let {
+                if (it.pdfUri.toString().isNotEmpty()) {
+                    screenState = it.copy(bookPage = pageTurn.bookPage)
+                    pdfPreferences.saveLastPosition(it.pdfUri, pageTurn.bookPage)
+                }
+            }
+        }
+        syncManager.onDeviceArrangementChanged = { devices -> deviceArrangement = devices }
+        syncManager.onStatusUpdate = { status ->
+            statusTextState = status
+            (screenState as? ScreenState.PdfViewer)?.let {
+                screenState = it.copy(statusText = status)
+            }
+        }
+        syncManager.onFileReceived = { file: File ->
+            val cachedFileUri = Uri.fromFile(file)
+            updateStateAndSavePdf(cachedFileUri, isLocal = false)
+        }
+        syncManager.onFollowerJoined = { statusTextState = "Follower joined: ${it.deviceName}" }
+        syncManager.onLeaderFound = {
+            statusTextState = "Connected to leader. Waiting for file..."
+        }
+        syncManager.onNoLeaderFound = {
+            statusTextState = "No leader found. Load a PDF to start your own session."
+            screenState = ScreenState.SelectPdfToLoadOrDiscover
+        }
+        syncManager.onDisconnectedFromLeader = {
+            statusTextState = "Disconnected from leader."
+            screenState = ScreenState.SelectPdfToLoadOrDiscover
+        }
+        syncManager.onAdvertisingStarted = {
+            (screenState as? ScreenState.PdfViewer)?.let {
+                if (it.isLocalViewingOnly) {
+                    screenState = it.copy(
+                        isActuallyLeading = true,
+                        statusText = "Broadcasting session...",
+                        isLocalViewingOnly = false
+                    )
+                }
+            }
+            statusTextState = "Advertising started."
+        }
+        syncManager.onAdvertisingFailed = {
+            statusTextState = "Advertising failed to start."
+            (screenState as? ScreenState.PdfViewer)?.let {
+                if (it.isLocalViewingOnly) {
+                    screenState =
+                        it.copy(statusText = "Failed to start advertising. Still in local viewing mode.")
+                }
+            }
+        }
+    }
 
-    LaunchedEffect(permissionState.allPermissionsGranted) {
+    val permissionsList = remember { 
+        listOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.BLUETOOTH_SCAN,
+            Manifest.permission.BLUETOOTH_ADVERTISE,
+            Manifest.permission.BLUETOOTH_CONNECT,
+            Manifest.permission.NEARBY_WIFI_DEVICES 
+        ).distinct() 
+    }
+
+    val permissionState = rememberMultiplePermissionsState(permissionsList) { permissionsResult ->
+        if (!permissionsResult.all { it.value }) {
+            if (screenState !is ScreenState.Permission) {
+                screenState = ScreenState.Permission
+            }
+            statusTextState = "Permissions required to use the app. Please grant all permissions to continue."
+        }
+    }
+
+    LaunchedEffect(key1 = permissionState.allPermissionsGranted) {
         if (permissionState.allPermissionsGranted) {
-            syncManager.start()
-        }
-    }
+            if (screenState is ScreenState.Permission) { 
+                val lastPosition = pdfPreferences.getLastPosition()
+                if (lastPosition != null && lastPosition.uri.toString().isNotEmpty()) {
+                    var uriAccessible = false
+                    try {
+                        context.contentResolver.openInputStream(lastPosition.uri)?.use { }
+                        uriAccessible = true
+                    } catch (_: Exception) {
+                        pdfPreferences.clearLastPosition()
+                    }
 
-    DisposableEffect(Unit) {
-        syncManager.start()
-        onDispose {
-            syncManager.stop()
-        }
-    }
-
-    val onTurnPage = { newBookPage: Int ->
-        bookPage = newBookPage
-        syncManager.broadcastPageTurn(PageTurn(newBookPage))
-        pdfUri?.let { uri ->
-            pdfPrefs.saveLastPosition(uri, newBookPage)
+                    if (uriAccessible) {
+                        val syncLoadSuccess = syncManager.loadFile(lastPosition.uri)
+                        screenState = ScreenState.PdfViewer(
+                            pdfUri = lastPosition.uri,
+                            bookPage = lastPosition.bookPage,
+                            isActuallyLeading = false, 
+                            statusText = if (syncLoadSuccess) "Loaded last viewed PDF." else "Loaded last PDF. Sync features might be limited.",
+                            isLocalViewingOnly = !syncLoadSuccess 
+                        )
+                        statusTextState = (screenState as ScreenState.PdfViewer).statusText
+                    } else {
+                        screenState = ScreenState.SelectPdfToLoadOrDiscover
+                        statusTextState = "Last PDF not found or inaccessible. Please select a PDF."
+                    }
+                } else {
+                    screenState = ScreenState.SelectPdfToLoadOrDiscover
+                    statusTextState = "Permissions granted. Load a PDF or find a session."
+                }
+            }
+        } else {
+            if (screenState is ScreenState.Permission) {
+                 permissionState.launchMultiplePermissionRequest()
+            }
         }
     }
 
@@ -100,82 +185,131 @@ fun MainScreen() {
         contract = ActivityResultContracts.OpenDocument(),
         onResult = { uri ->
             if (uri != null) {
-                val localUri = copyUriToInternalStorage(context, uri)
-                val newBookPage = 0
-                pdfPrefs.saveLastPosition(localUri, newBookPage)
-                pdfUri = localUri
-                bookPage = newBookPage
+                if (syncManager.loadFile(uri)) {
+                    updateStateAndSavePdf(uri, isLocal = true)
+                } else {
+                    statusTextState = "Failed to load PDF."
+                }
+            } else {
+                 statusTextState = "PDF selection cancelled."
+                 if (screenState !is ScreenState.PdfViewer) {
+                    screenState = ScreenState.SelectPdfToLoadOrDiscover
+                 }
             }
         }
     )
 
-    val launchFilePicker = remember {
-        {
-            pdfPrefs.clearLastPosition()
-            filePickerLauncher.launch(arrayOf("application/pdf"))
-        }
-    }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .safeDrawingPadding(),
+            .safeDrawingPadding() 
+            .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        if (!permissionState.allPermissionsGranted) {
-            PermissionRequestScreen { permissionState.launchMultiplePermissionRequest() }
-        } else if (pdfUri == null) {
-            FileSelectScreen(onFileSelectClicked = launchFilePicker)
-        } else {
+        
+        if (statusTextState.isNotEmpty() && screenState !is ScreenState.PdfViewer) {
+             Text(statusTextState, style = MaterialTheme.typography.titleSmall, textAlign = TextAlign.Center)
+             Spacer(Modifier.height(8.dp))
+        }
 
-            PdfViewerScreen(
-                pdfUri = pdfUri!!,
-                bookPage = bookPage,
-                thisDeviceIndex = thisDeviceIndex,
-                totalDevices = totalDevices,
-                onTurnPage = onTurnPage,
-                statusText = statusText,
-                onLoadNewDocumentClicked = launchFilePicker
-            )
+        when (val state = screenState) {
+            is ScreenState.Permission -> {
+                PermissionRequestScreen { permissionState.launchMultiplePermissionRequest() }
+            }
+            is ScreenState.SelectPdfToLoadOrDiscover -> {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(16.dp)) {
+                    Text("Choose an action", style = MaterialTheme.typography.headlineSmall)
+                    Spacer(Modifier.height(16.dp))
+                    Button(onClick = { filePickerLauncher.launch(arrayOf("application/pdf")) }) {
+                        Text("Load PDF")
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Button(onClick = {
+                        syncManager.startDiscovery()
+                        screenState = ScreenState.DiscoveringSession
+                        statusTextState = "Searching for sessions..."
+                    }) { Text("Find Existing Session") }
+                }
+            }
+            is ScreenState.DiscoveringSession -> {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(statusTextState.ifEmpty { "Searching for existing session..." }, style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(16.dp))
+                    CircularProgressIndicator()
+                    Spacer(Modifier.height(32.dp))
+                    Button(onClick = {
+                        syncManager.stopDiscovery()
+                        screenState = ScreenState.SelectPdfToLoadOrDiscover
+                        statusTextState = "Search cancelled."
+                    }) {
+                        Text("Cancel Search")
+                    }
+                }
+            }
+            is ScreenState.PdfViewer -> {
+                Column(modifier=Modifier.fillMaxSize()){
+                    Box(modifier = Modifier.weight(1f)){
+                        PdfViewerScreen(
+                            pdfUri = state.pdfUri,
+                            bookPage = state.bookPage,
+                            deviceArrangement = deviceArrangement,
+                            onTurnPage = { newBookPage ->
+                                 (screenState as? ScreenState.PdfViewer)?.let { 
+                                    screenState = it.copy(bookPage = newBookPage)
+                                    pdfPreferences.saveLastPosition(it.pdfUri, newBookPage)
+                                }
+                                if(state.isActuallyLeading) {
+                                    syncManager.broadcastPageTurn(PageTurn(newBookPage))
+                                }
+                            },
+                            statusText = state.statusText, 
+                            onStartSessionClicked = { },
+                            isLeader = state.isActuallyLeading
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly){
+                        if (state.isLocalViewingOnly) { 
+                            Button(onClick = { syncManager.startLeadingSession() }) { Text("Start Leading") }
+                            Button(onClick = {
+                                syncManager.startDiscovery()
+                                screenState = ScreenState.DiscoveringSession
+                            }) { Text("Find Other Session") }
+                            Button(onClick = { filePickerLauncher.launch(arrayOf("application/pdf")) }) {Text("Load Different PDF")}
+                        } else if (state.isActuallyLeading) { 
+                            Button(onClick = {
+                                syncManager.stopLeading()
+                            }) { Text("Stop Leading") }
+                        } else { 
+                            Button(onClick = {
+                                syncManager.leaveSession()
+                            }) { Text("Leave Session") }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            syncManager.shutdown()
         }
     }
 }
-
-private fun copyUriToInternalStorage(context: Context, uri: Uri): Uri {
-    val inputStream = context.contentResolver.openInputStream(uri)
-    val file = File(context.filesDir, "last_opened_document.pdf")
-    val outputStream = FileOutputStream(file)
-    inputStream?.copyTo(outputStream)
-    outputStream.close()
-    inputStream?.close()
-    return Uri.fromFile(file)
-}
-
 
 @Composable
 fun PermissionRequestScreen(onGrantClicked: () -> Unit) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
-        modifier = Modifier.padding(16.dp)
+        modifier = Modifier.fillMaxSize()
     ) {
-        Text("Permissions Required", style = MaterialTheme.typography.headlineSmall)
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            "This app needs permissions to find and connect to nearby devices.",
-            textAlign = TextAlign.Center
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-        Button(onClick = onGrantClicked) { Text("Grant Permissions") }
-    }
-}
-
-@Composable
-fun FileSelectScreen(onFileSelectClicked: () -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("Welcome to Legato Pages", style = MaterialTheme.typography.headlineSmall)
-        Spacer(modifier = Modifier.height(16.dp))
-        Button(onClick = onFileSelectClicked) { Text("Select a PDF Score") }
+        Text("Permissions are required to discover and connect to nearby devices, and access PDF files.", textAlign = TextAlign.Center)
+        Spacer(Modifier.height(16.dp))
+        Button(onClick = onGrantClicked) {
+            Text("Grant Permissions")
+        }
     }
 }
