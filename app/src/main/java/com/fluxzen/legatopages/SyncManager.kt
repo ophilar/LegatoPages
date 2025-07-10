@@ -1,6 +1,7 @@
 package com.fluxzen.legatopages
 
 import android.content.Context
+import android.os.Build
 
 import android.net.Uri
 import android.util.Log
@@ -34,14 +35,14 @@ class SyncManager(private val context: Context) {
     var onAdvertisingFailed: (() -> Unit)? = null
     var onLeadingStopped: (() -> Unit)? = null
 
+    private val myDeviceName = Build.MODEL
+
     private val connectionsClient = Nearby.getConnectionsClient(context)
     private val serviceId = "com.fluxzen.legatopages.SERVICE_ID"
     private val strategy = Strategy.P2P_CLUSTER
     private val gson = Gson()
     private val cacheManager = CacheManager(context)
     private val pdfPreferences = PdfPreferences(context) 
-
-    
 
     private var isLeader = false
     private var leaderEndpointId: String? = null
@@ -180,7 +181,12 @@ class SyncManager(private val context: Context) {
                 }
             }
             is SyncMessage.PageChanged -> onPageTurnReceived?.invoke(PageTurn(message.bookPage))
-            is SyncMessage.ArrangementUpdate -> onDeviceArrangementChanged?.invoke(message.devices)
+            is SyncMessage.ArrangementUpdate -> {
+                val processedList = message.devices.map { device ->
+                    device.copy(isThisDevice = device.deviceName == myDeviceName)
+                }
+                onDeviceArrangementChanged?.invoke(processedList)
+            }
         }
     }
 
@@ -246,10 +252,11 @@ class SyncManager(private val context: Context) {
         isLeader = true
         val advertisingOptions = AdvertisingOptions.Builder().setStrategy(strategy).build()
         connectionsClient.startAdvertising(
-            "LeaderDevice", serviceId, connectionLifecycleCallback, advertisingOptions
+            myDeviceName, serviceId, connectionLifecycleCallback, advertisingOptions
         ).addOnSuccessListener {
             onStatusUpdate?.invoke("Advertising started. Waiting for followers.")
             onAdvertisingStarted?.invoke()
+            broadcastDeviceArrangement()
         }.addOnFailureListener { e ->
             onStatusUpdate?.invoke("Advertising failed: ${e.message}")
             isLeader = false
@@ -266,13 +273,13 @@ class SyncManager(private val context: Context) {
             serviceId, object : EndpointDiscoveryCallback() {
                 override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
                     onStatusUpdate?.invoke("Found leader: ${info.endpointName}. Connecting...")
-                    connectionsClient.requestConnection("FollowerDevice", endpointId, connectionLifecycleCallback)
+                    connectionsClient.requestConnection(myDeviceName, endpointId, connectionLifecycleCallback)
                         .addOnFailureListener { e ->
                             onStatusUpdate?.invoke("Connection request to ${info.endpointName} failed: ${e.message}. Restarting discovery might be needed if no other leaders are found.")
                         }
                 }
                 override fun onEndpointLost(endpointId: String) {
-                    onStatusUpdate?.invoke("Leader ${endpointId} lost during discovery.")
+                    onStatusUpdate?.invoke("Leader $endpointId lost during discovery.")
                 }
             }, discoveryOptions
         ).addOnSuccessListener {
@@ -307,11 +314,15 @@ class SyncManager(private val context: Context) {
 
     private fun broadcastDeviceArrangement() {
         if (!isLeader) return
-        val selfDeviceName = "This Device (Leader)"
-        val allDevices = mutableListOf(Device("leader_self_id", selfDeviceName, isLeader = true, isThisDevice = true))
-        allDevices.addAll(connectedEndpoints.map { Device(it.endpointId, it.deviceName, isLeader = false, isThisDevice = false) })
+
+        val selfDevice = Device("leader_self_id", myDeviceName, isLeader = true, isThisDevice = true)
+
+        val allDevices = mutableListOf(selfDevice)
+        allDevices.addAll(connectedEndpoints)
+
         val message = SyncMessage.ArrangementUpdate(allDevices)
         sendMessageToAll(message)
+
         onDeviceArrangementChanged?.invoke(allDevices)
     }
 
