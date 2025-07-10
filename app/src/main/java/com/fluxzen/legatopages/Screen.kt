@@ -27,12 +27,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.fluxzen.legatopages.ui.PdfViewerScreen
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import java.io.File
+
+private const val PDF_MIME_TYPE = "application/pdf"
 
 sealed class ScreenState {
     abstract val statusText: String
@@ -92,7 +95,7 @@ fun MainScreen() {
 
     fun executePageTurn(direction: PageTurnDirection) {
         (screenState as? ScreenState.PdfViewer)?.let { state ->
-            // A device can only execute a page turn if it's not a follower.
+
             if (!state.isLocalViewingOnly && !state.isActuallyLeading) return
 
             val totalDevices =
@@ -102,11 +105,11 @@ fun MainScreen() {
                 PageTurnDirection.PREVIOUS -> (state.bookPage - totalDevices).coerceAtLeast(0)
             }
 
-            // Update the local UI state.
+
             screenState = state.copy(bookPage = newBookPage)
             pdfPreferences.savePageForFile(state.fileHash, newBookPage)
 
-            // If it's a leader, broadcast the result to all followers.
+
             if (state.isActuallyLeading) {
                 syncManager.broadcastPageTurn(PageTurn(newBookPage))
             }
@@ -294,10 +297,13 @@ fun MainScreen() {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.padding(16.dp)
                 ) {
-                    Text("Choose an action", style = MaterialTheme.typography.headlineSmall)
+                    Text(
+                        stringResource(R.string.choose_action),
+                        style = MaterialTheme.typography.headlineSmall
+                    )
                     Spacer(Modifier.height(16.dp))
-                    Button(onClick = { filePickerLauncher.launch(arrayOf("application/pdf")) }) {
-                        Text("Load PDF")
+                    Button(onClick = { filePickerLauncher.launch(arrayOf(PDF_MIME_TYPE)) }) {
+                        Text(stringResource(R.string.button_load_pdf))
                     }
                     Spacer(Modifier.height(8.dp))
                     Button(onClick = {
@@ -310,14 +316,12 @@ fun MainScreen() {
 
             is ScreenState.DiscoveringSession -> {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-
                     Text(state.statusText, style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(16.dp))
                     CircularProgressIndicator()
                     Spacer(Modifier.height(32.dp))
                     Button(onClick = {
                         syncManager.stopDiscovery()
-
                         screenState = ScreenState.SelectPdfToLoadOrDiscover("Search cancelled.")
                     }) {
                         Text("Cancel Search")
@@ -378,12 +382,12 @@ fun PermissionRequestScreen(onGrantClicked: () -> Unit) {
         modifier = Modifier.fillMaxSize()
     ) {
         Text(
-            "Permissions are required to discover and connect to nearby devices, and access PDF files.",
+            stringResource(R.string.permissions_required_rationale),
             textAlign = TextAlign.Center
         )
         Spacer(Modifier.height(16.dp))
         Button(onClick = onGrantClicked) {
-            Text("Grant Permissions")
+            Text(stringResource(R.string.button_grant_permissions))
         }
     }
 }

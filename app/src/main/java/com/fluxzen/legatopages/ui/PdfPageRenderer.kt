@@ -15,6 +15,9 @@ import java.io.IOException
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
+private const val TAG = "PdfPageRenderer"
+private const val PDF_READ_MODE = "r"
+
 class PdfPageRenderer(context: Context, private val pdfUri: Uri) {
 
     private var parcelFileDescriptor: ParcelFileDescriptor? = null
@@ -28,39 +31,39 @@ class PdfPageRenderer(context: Context, private val pdfUri: Uri) {
 
     init {
         try {
-            parcelFileDescriptor = context.contentResolver.openFileDescriptor(pdfUri, "r")
+            parcelFileDescriptor = context.contentResolver.openFileDescriptor(pdfUri, PDF_READ_MODE)
             if (parcelFileDescriptor != null) {
                 pdfRenderer = PdfRenderer(parcelFileDescriptor!!)
                 _pageCount = pdfRenderer!!.pageCount
                 initializationOk = true
                 Log.d(
-                    "PdfPageRenderer",
+                    TAG,
                     "Successfully initialized for URI: $pdfUri, Page count: $_pageCount"
                 )
             } else {
                 Log.w(
-                    "PdfPageRenderer",
+                    TAG,
                     "Failed to open ParcelFileDescriptor for URI: $pdfUri. URI might be invalid or file not accessible."
                 )
                 initializationOk = false
             }
         } catch (e: IOException) {
             Log.e(
-                "PdfPageRenderer",
+                TAG,
                 "IOException during PdfPageRenderer initialization for $pdfUri",
                 e
             )
             closeInternals()
         } catch (e: SecurityException) {
             Log.e(
-                "PdfPageRenderer",
+                TAG,
                 "SecurityException during PdfPageRenderer initialization for $pdfUri",
                 e
             )
             closeInternals()
         } catch (e: Exception) {
             Log.e(
-                "PdfPageRenderer",
+                TAG,
                 "Unexpected error during PdfPageRenderer initialization for $pdfUri",
                 e
             )
@@ -70,18 +73,18 @@ class PdfPageRenderer(context: Context, private val pdfUri: Uri) {
 
     suspend fun renderPage(pageIndex: Int, destSize: androidx.compose.ui.geometry.Size): Bitmap? {
         if (!initializationOk) {
-            Log.w("PdfPageRenderer", "renderPage called but renderer not initialized.")
+            Log.w(TAG, "renderPage called but renderer not initialized.")
             return null
         }
         return withContext(Dispatchers.Default) {
             lock.withLock {
                 if (pdfRenderer == null) {
-                    Log.w("PdfPageRenderer", "renderPage called after close().")
+                    Log.w(TAG, "renderPage called after close().")
                     return@withContext null
                 }
                 if (pageIndex < 0 || pageIndex >= _pageCount) {
                     Log.w(
-                        "PdfPageRenderer",
+                        TAG,
                         "renderPage called with invalid pageIndex: $pageIndex (pageCount: $_pageCount)."
                     )
                     return@withContext null
@@ -93,7 +96,7 @@ class PdfPageRenderer(context: Context, private val pdfUri: Uri) {
                     currentRenderer.openPage(pageIndex).use { page ->
                         if (page.width <= 0 || page.height <= 0) {
                             Log.e(
-                                "PdfPageRenderer",
+                                TAG,
                                 "Page $pageIndex has invalid dimensions: ${page.width}x${page.height}"
                             )
                             return@withContext null
@@ -106,7 +109,7 @@ class PdfPageRenderer(context: Context, private val pdfUri: Uri) {
 
                         if (scale <= 0f) {
                             Log.e(
-                                "PdfPageRenderer",
+                                TAG,
                                 "Calculated scale is non-positive: $scale. DestSize: ${destSize.width}x${destSize.height}, Page: ${page.width}x${page.height}"
                             )
                             return@withContext null
@@ -117,7 +120,7 @@ class PdfPageRenderer(context: Context, private val pdfUri: Uri) {
 
                         if (bitmapWidth <= 0 || bitmapHeight <= 0) {
                             Log.e(
-                                "PdfPageRenderer",
+                                TAG,
                                 "Calculated bitmap dimensions are invalid: ${bitmapWidth}x$bitmapHeight. Scale: $scale"
                             )
                             return@withContext null
@@ -134,7 +137,7 @@ class PdfPageRenderer(context: Context, private val pdfUri: Uri) {
                         bitmap
                     }
                 } catch (e: Exception) {
-                    Log.e("PdfPageRenderer", "Error rendering page $pageIndex for $pdfUri", e)
+                    Log.e(TAG, "Error rendering page $pageIndex for $pdfUri", e)
                     null
                 }
             }
@@ -144,19 +147,19 @@ class PdfPageRenderer(context: Context, private val pdfUri: Uri) {
     private fun closeInternals() {
         if (parcelFileDescriptor != null || pdfRenderer != null || initializationOk) {
             Log.d(
-                "PdfPageRenderer",
+                TAG,
                 "Closing PdfPageRenderer internals. Initialized: $initializationOk"
             )
         }
         try {
             pdfRenderer?.close()
         } catch (e: Exception) {
-            Log.e("PdfPageRenderer", "Error closing PdfRenderer.", e)
+            Log.e(TAG, "Error closing PdfRenderer.", e)
         }
         try {
             parcelFileDescriptor?.close()
         } catch (e: Exception) {
-            Log.e("PdfPageRenderer", "Error closing ParcelFileDescriptor.", e)
+            Log.e(TAG, "Error closing ParcelFileDescriptor.", e)
         }
         pdfRenderer = null
         parcelFileDescriptor = null

@@ -21,6 +21,9 @@ import com.google.gson.Gson
 import java.io.File
 import java.nio.charset.StandardCharsets
 
+private const val SERVICE_ID = "com.fluxzen.legatopages.SERVICE_ID"
+private const val DISCOVERY_TIMEOUT_MS = 10000L
+
 data class PageTurn(val bookPage: Int)
 data class Device(
     val endpointId: String,

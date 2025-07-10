@@ -14,6 +14,15 @@ import java.math.BigInteger
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
+private const val CACHE_SUBDIR = "shared_pdfs"
+private const val CACHE_DURATION_DAYS = 7L
+private const val TEMP_FILE_EXTENSION = ".tmp"
+private const val HASH_ALGORITHM = "MD5"
+private const val HASH_BUFFER_SIZE = 8192
+private const val HEX_RADIX = 16
+private const val MD5_HASH_LENGTH = 32
+private const val PAD_CHAR = '0'
+
 class CacheManager(private val context: Context) {
 
     private val cacheDir = File(context.cacheDir, "shared_pdfs").apply { mkdirs() }

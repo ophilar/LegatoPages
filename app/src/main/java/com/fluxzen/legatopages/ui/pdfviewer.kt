@@ -61,15 +61,28 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.fluxzen.legatopages.Device
 import com.fluxzen.legatopages.PageTurnDirection
+import com.fluxzen.legatopages.R
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+
+private const val HIDE_CONTROLS_DELAY_MS = 3000L
+private const val MIN_ZOOM_SCALE = 1f
+private const val MAX_ZOOM_SCALE = 5f
+private const val BUTTON_BACKGROUND_ALPHA = 0.6f
+private const val PERMANENT_CONTROLS_VISIBLE_ALPHA = 0.7f
+private const val PERMANENT_CONTROLS_HIDDEN_ALPHA = 0.3f
+private const val STATUS_BAR_WIDTH_FRACTION = 0.8f
+private val ARROW_ICON_SIZE = 48.dp
+
+private const val ANIMATION_LABEL_PERMANENT_CONTROLS = "PermanentControlAlpha"
 
 @Composable
 fun PdfViewerScreen(
@@ -127,7 +140,7 @@ fun PdfViewerScreen(
     fun scheduleHideControls() {
         hideControlsJob?.cancel()
         hideControlsJob = coroutineScope.launch {
-            delay(3000)
+            delay(HIDE_CONTROLS_DELAY_MS)
             controlsVisible = false
         }
     }
@@ -156,16 +169,12 @@ fun PdfViewerScreen(
     }
 
     fun turnPageNext() {
-//        val newBookPage = currentBookPage + totalDevices
-//        if ((newBookPage + thisDeviceIndex) < renderer.pageCount) {
         currentOnTurnPage(PageTurnDirection.NEXT)
         scale = 1f
         offset = Offset.Zero
-//        }
     }
 
     fun turnPagePrevious() {
-//        val newBookPage = (currentBookPage - totalDevices).coerceAtLeast(0)
         currentOnTurnPage(PageTurnDirection.PREVIOUS)
         scale = 1f
         offset = Offset.Zero
@@ -174,12 +183,12 @@ fun PdfViewerScreen(
     var showPageDialog by remember { mutableStateOf(false) }
 
     val transparentButtonColors = ButtonDefaults.buttonColors(
-        containerColor = Color.Black.copy(alpha = 0.6f),
+        containerColor = Color.Black.copy(alpha = BUTTON_BACKGROUND_ALPHA),
         contentColor = Color.White
     )
     val permanentControlAlpha by animateFloatAsState(
-        targetValue = if (controlsVisible) 0.7f else 0.3f,
-        label = "PermanentControlAlpha"
+        targetValue = if (controlsVisible) PERMANENT_CONTROLS_VISIBLE_ALPHA else PERMANENT_CONTROLS_HIDDEN_ALPHA,
+        label = ANIMATION_LABEL_PERMANENT_CONTROLS
     )
 
     Box(
@@ -204,7 +213,7 @@ fun PdfViewerScreen(
                         val pan = event.calculatePan()
 
                         if (event.changes.size > 1) {
-                            scale = (scale * zoom).coerceIn(1f, 5f)
+                            scale = (scale * zoom).coerceIn(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE)
                             offset = if (scale > 1f) offset + pan else Offset.Zero
                         } else if (!zoomOccurred && !horizontalSwipeLock) {
                             if (abs(pan.x) > viewConfiguration.touchSlop) {
@@ -276,7 +285,7 @@ fun PdfViewerScreen(
                         Icons.AutoMirrored.Filled.KeyboardArrowLeft,
                         contentDescription = "Previous Page",
                         tint = Color.White,
-                        modifier = Modifier.size(48.dp)
+                        modifier = Modifier.size(ARROW_ICON_SIZE)
                     )
                 }
 
@@ -329,7 +338,7 @@ fun PdfViewerScreen(
                         Icons.AutoMirrored.Filled.KeyboardArrowRight,
                         contentDescription = "Next Page",
                         tint = Color.White,
-                        modifier = Modifier.size(48.dp)
+                        modifier = Modifier.size(ARROW_ICON_SIZE)
                     )
                 }
             }
@@ -338,7 +347,7 @@ fun PdfViewerScreen(
 
             Row(
                 modifier = Modifier
-                    .fillMaxWidth(0.8f)
+                    .fillMaxWidth(STATUS_BAR_WIDTH_FRACTION)
                     .background(
                         Color.Black.copy(alpha = permanentControlAlpha),
                         RoundedCornerShape(8.dp)
@@ -392,20 +401,20 @@ private fun GoToPageDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Go to Page") },
+        title = { Text(stringResource(R.string.dialog_title_go_to_page)) },
         text = {
             Column {
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it.filter { c -> c.isDigit() } },
-                    label = { Text("Page (1 - $totalPages)") },
+                    label = { Text(stringResource(R.string.dialog_label_page_number, totalPages)) },
                     isError = isError,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true
                 )
                 if (isError) {
                     Text(
-                        text = "Enter a valid page number.",
+                        text = stringResource(R.string.dialog_error_invalid_page),
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(top = 4.dp)
@@ -418,12 +427,12 @@ private fun GoToPageDialog(
                 onClick = { text.toIntOrNull()?.let(onConfirm) },
                 enabled = !isError && text.isNotEmpty()
             ) {
-                Text("Go")
+                Text(stringResource(R.string.button_go))
             }
         },
         dismissButton = {
             Button(onClick = onDismiss) {
-                Text("Cancel")
+                Text(stringResource(R.string.legato_button_cancel))
             }
         }
     )

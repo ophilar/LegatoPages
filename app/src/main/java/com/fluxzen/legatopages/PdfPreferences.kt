@@ -3,6 +3,11 @@ package com.fluxzen.legatopages
 import android.content.Context
 import androidx.core.content.edit
 
+private const val PREFS_NAME = "LegatoPagesPrefs"
+private const val KEY_LAST_OPENED_FILE_HASH = "lastOpenedFileHash"
+private const val PREFIX_PAGE_FOR_FILE = "pageForFile_"
+private const val DEFAULT_PAGE_NUMBER = 0
+
 class PdfPreferences(context: Context) {
 
     private val prefs = context.getSharedPreferences("LegatoPagesPrefs", Context.MODE_PRIVATE)

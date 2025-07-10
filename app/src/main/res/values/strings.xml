@@ -1,3 +1,32 @@
 <resources>
-    <string name="app_name">Legato Pages</string>
+    <string name="app_name">LegatoPages</string>
+
+    <!-- Permissions Screen -->
+    <string name="permissions_required_rationale">Permissions are required to discover and connect to nearby devices, and access PDF files.</string>
+    <string name="button_grant_permissions">Grant Permissions</string>
+
+    <!-- Main Selection Screen -->
+    <string name="choose_action">Choose an action</string>
+    <string name="button_load_pdf">Load PDF</string>
+    <string name="button_find_session">Find Existing Session</string>
+    <string name="button_cancel_search">Cancel Search</string>
+
+    <!-- PDF Viewer Screen -->
+    <string name="pdf_page_content_description">PDF Page %1$d</string>
+    <string name="end_of_document">End of document</string>
+    <string name="previous_page_description">Previous Page</string>
+    <string name="next_page_description">Next Page</string>
+    <string name="button_start_leading">Start Leading</string>
+    <string name="button_stop_leading">Stop Leading</string>
+    <string name="button_leave_session">Leave Session</string>
+    <string name="button_load_new_pdf">Load New</string>
+    <string name="status_bar_page_indicator">Page %1$d/%2$d</string>
+
+    <!-- Go To Page Dialog -->
+    <string name="dialog_title_go_to_page">Go to Page</string>
+    <string name="dialog_label_page_number">Page (1 - %1$d)</string>
+    <string name="dialog_error_invalid_page">Enter a valid page number.</string>
+    <string name="button_go">Go</string>
+    <string name="legato_button_cancel">Cancel</string>
+
 </resources>
