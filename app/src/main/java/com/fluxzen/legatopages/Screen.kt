@@ -3,6 +3,7 @@ package com.fluxzen.legatopages
 import android.Manifest
 import android.net.Uri
 import android.os.Build
+import android.util.Log
 import android.view.WindowManager
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -77,9 +78,8 @@ fun MainScreen() {
     val viewModel: MainViewModel = viewModel()
     val syncManager = viewModel.syncManager
 
-    fun updateStateAndSavePdf(file: File, isLocal: Boolean, initialPage: Int? = null) {
+    fun updateStateAndSavePdf(file: File, fileHash: String, isLocal: Boolean, initialPage: Int? = null) {
         val fileUri = Uri.fromFile(file)
-        val fileHash = cacheManager.getFileHash(file.inputStream())
 
         val pageToLoad = initialPage ?: if (isLocal) 0 else pdfPreferences.getPageForFile(fileHash)
 
@@ -141,7 +141,22 @@ fun MainScreen() {
             }
         }
         syncManager.onFileReceived = { file: File ->
-            updateStateAndSavePdf(file, isLocal = false, pendingPageNumber)
+            val fileHash = syncManager.currentFileInfo?.fileHash
+            if (fileHash != null) {
+                updateStateAndSavePdf(
+                    file,
+                    fileHash,
+                    isLocal = false,
+                    initialPage = pendingPageNumber
+                )
+            } else {
+                // This is an error case, the file was received without its info
+                Log.e("MainScreen", "File received but no file hash is known.")
+                // Fallback to calculating it, or show an error
+                val calculatedHash = cacheManager.getFileHash(file.inputStream())
+                updateStateAndSavePdf(file, calculatedHash, isLocal = false, initialPage = pendingPageNumber)
+            }
+
             pendingPageNumber = null
         }
         syncManager.onFollowerJoined = { device ->
@@ -172,6 +187,8 @@ fun MainScreen() {
                         statusText = "Broadcasting session...",
                         isLocalViewingOnly = false
                     )
+                    syncManager.broadcastFileInfo()
+                    syncManager.broadcastPageTurn(PageTurn(it.bookPage))
                 }
             }
         }
@@ -221,12 +238,10 @@ fun MainScreen() {
                 if (lastFileHash != null) {
                     val file = cacheManager.getCachedFile(lastFileHash)
                     if (file != null) {
-                        val fileUri = Uri.fromFile(file)
-
-                        syncManager.loadFile(fileUri)
+                        syncManager.loadFile(file, lastFileHash)
                         val pageToResume = pdfPreferences.getPageForFile(lastFileHash)
                         screenState = ScreenState.PdfViewer(
-                            pdfUri = fileUri,
+                            pdfUri =  Uri.fromFile(file),
                             bookPage = pageToResume,
                             isActuallyLeading = false,
                             statusText = "Last PDF loaded. Start leading or find a session.",
@@ -254,11 +269,23 @@ fun MainScreen() {
         contract = ActivityResultContracts.OpenDocument(),
         onResult = { uri ->
             if (uri != null) {
+                val currentState = screenState as? ScreenState.PdfViewer
+                // If a follower clicks "Load New", they must leave the session first.
+                if (currentState != null && !currentState.isLocalViewingOnly && !currentState.isActuallyLeading) {
+                        syncManager.leaveSession()
+                    }
+
                 val cachedResult = cacheManager.cacheFileFromUri(uri)
                 if (cachedResult != null) {
-                    val (_, file) = cachedResult
-                    if (syncManager.loadFile(Uri.fromFile(file))) {
-                        updateStateAndSavePdf(file, isLocal = true)
+                    val (fileHash, file) = cachedResult
+                    if (syncManager.loadFile(file, fileHash)) {
+                        updateStateAndSavePdf(file, fileHash, isLocal = true)
+                        // If we are already a leader, we need to inform existing followers
+                        // of the new file and reset the page.
+                        if (currentState != null && currentState.isActuallyLeading) {
+                                syncManager.broadcastFileInfo()
+                                syncManager.broadcastPageTurn(PageTurn(0))
+                            }
                     } else {
                         screenState =
                             (screenState as? ScreenState.PdfViewer)?.copy(statusText = "Failed to load PDF.")

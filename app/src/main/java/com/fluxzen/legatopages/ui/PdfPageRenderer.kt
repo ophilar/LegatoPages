@@ -18,82 +18,28 @@ import kotlin.concurrent.withLock
 private const val TAG = "PdfPageRenderer"
 private const val PDF_READ_MODE = "r"
 
-class PdfPageRenderer(context: Context, private val pdfUri: Uri) {
-
-    private var parcelFileDescriptor: ParcelFileDescriptor? = null
-    private var pdfRenderer: PdfRenderer? = null
-    private var _pageCount: Int = 0
-    private var initializationOk: Boolean = false
+class PdfPageRenderer private constructor(
+    private var pdfRenderer: PdfRenderer,
+    private var parcelFileDescriptor: ParcelFileDescriptor,
+) {
     private val lock = ReentrantLock()
 
-    val pageCount: Int
-        get() = _pageCount
-
-    init {
-        try {
-            parcelFileDescriptor = context.contentResolver.openFileDescriptor(pdfUri, PDF_READ_MODE)
-            if (parcelFileDescriptor != null) {
-                pdfRenderer = PdfRenderer(parcelFileDescriptor!!)
-                _pageCount = pdfRenderer!!.pageCount
-                initializationOk = true
-                Log.d(
-                    TAG,
-                    "Successfully initialized for URI: $pdfUri, Page count: $_pageCount"
-                )
-            } else {
-                Log.w(
-                    TAG,
-                    "Failed to open ParcelFileDescriptor for URI: $pdfUri. URI might be invalid or file not accessible."
-                )
-                initializationOk = false
-            }
-        } catch (e: IOException) {
-            Log.e(
-                TAG,
-                "IOException during PdfPageRenderer initialization for $pdfUri",
-                e
-            )
-            closeInternals()
-        } catch (e: SecurityException) {
-            Log.e(
-                TAG,
-                "SecurityException during PdfPageRenderer initialization for $pdfUri",
-                e
-            )
-            closeInternals()
-        } catch (e: Exception) {
-            Log.e(
-                TAG,
-                "Unexpected error during PdfPageRenderer initialization for $pdfUri",
-                e
-            )
-            closeInternals()
-        }
-    }
+    val pageCount: Int = pdfRenderer.pageCount
 
     suspend fun renderPage(pageIndex: Int, destSize: androidx.compose.ui.geometry.Size): Bitmap? {
-        if (!initializationOk) {
-            Log.w(TAG, "renderPage called but renderer not initialized.")
-            return null
-        }
         return withContext(Dispatchers.Default) {
             lock.withLock {
-                if (pdfRenderer == null) {
-                    Log.w(TAG, "renderPage called after close().")
-                    return@withContext null
-                }
-                if (pageIndex < 0 || pageIndex >= _pageCount) {
+
+                if (pageIndex < 0 || pageIndex >= pageCount) {
                     Log.w(
                         TAG,
-                        "renderPage called with invalid pageIndex: $pageIndex (pageCount: $_pageCount)."
+                        "renderPage called with invalid pageIndex: $pageIndex (pageCount: $pageCount)."
                     )
                     return@withContext null
                 }
 
-                val currentRenderer = pdfRenderer!!
-
                 try {
-                    currentRenderer.openPage(pageIndex).use { page ->
+                    pdfRenderer.openPage(pageIndex).use { page ->
                         if (page.width <= 0 || page.height <= 0) {
                             Log.e(
                                 TAG,
@@ -137,7 +83,7 @@ class PdfPageRenderer(context: Context, private val pdfUri: Uri) {
                         bitmap
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error rendering page $pageIndex for $pdfUri", e)
+                    Log.e(TAG, "Error rendering page $pageIndex", e)
                     null
                 }
             }
@@ -145,31 +91,48 @@ class PdfPageRenderer(context: Context, private val pdfUri: Uri) {
     }
 
     private fun closeInternals() {
-        if (parcelFileDescriptor != null || pdfRenderer != null || initializationOk) {
-            Log.d(
-                TAG,
-                "Closing PdfPageRenderer internals. Initialized: $initializationOk"
-            )
-        }
+        Log.d(
+            TAG, "Closing PdfPageRenderer internals."
+        )
         try {
-            pdfRenderer?.close()
+            pdfRenderer.close()
         } catch (e: Exception) {
             Log.e(TAG, "Error closing PdfRenderer.", e)
         }
         try {
-            parcelFileDescriptor?.close()
+            parcelFileDescriptor.close()
         } catch (e: Exception) {
             Log.e(TAG, "Error closing ParcelFileDescriptor.", e)
         }
-        pdfRenderer = null
-        parcelFileDescriptor = null
-        _pageCount = 0
-        initializationOk = false
     }
 
     fun close() {
         lock.withLock {
             closeInternals()
+        }
+    }
+
+    companion object {
+        suspend fun create(context: Context, pdfUri: Uri): Result<PdfPageRenderer> {
+            return withContext(Dispatchers.IO) {
+                var pfd: ParcelFileDescriptor? = null // Declare here to close on failure
+                try {
+                    // This code now runs safely on a background thread.
+                    pfd = context.contentResolver.openFileDescriptor(pdfUri, PDF_READ_MODE)
+                        ?: throw IOException("Failed to open ParcelFileDescriptor for URI: $pdfUri")
+                    val renderer = PdfRenderer(pfd)
+                    val pageRenderer = PdfPageRenderer(renderer, pfd)
+                    Log.d(
+                        TAG,
+                        "Successfully initialized for URI: $pdfUri, Page count: ${pageRenderer.pageCount}"
+                    )
+                    Result.success(pageRenderer)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error during PdfPageRenderer creation for $pdfUri", e)
+                    pfd?.close()
+                    Result.failure(e)
+                }
+            }
         }
     }
 }
