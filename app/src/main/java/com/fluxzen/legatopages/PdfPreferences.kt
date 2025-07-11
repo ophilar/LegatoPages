@@ -10,12 +10,7 @@ private const val DEFAULT_PAGE_NUMBER = 0
 
 class PdfPreferences(context: Context) {
 
-    private val prefs = context.getSharedPreferences("LegatoPagesPrefs", Context.MODE_PRIVATE)
-
-    companion object {
-        private const val KEY_LAST_OPENED_FILE_HASH = "lastOpenedFileHash"
-        private const val PREFIX_PAGE_FOR_FILE = "pageForFile_"
-    }
+    private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     /**
      * Saves the last viewed page for a specific file and updates
@@ -33,7 +28,7 @@ class PdfPreferences(context: Context) {
      * Returns 0 if no page is stored for this file.
      */
     fun getPageForFile(fileHash: String): Int {
-        return prefs.getInt(PREFIX_PAGE_FOR_FILE + fileHash, 0)
+        return prefs.getInt(PREFIX_PAGE_FOR_FILE + fileHash, DEFAULT_PAGE_NUMBER)
     }
 
     /**

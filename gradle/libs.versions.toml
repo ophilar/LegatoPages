@@ -13,6 +13,8 @@ pdfViewer = "1.0.0-alpha09"
 playServicesNearby = "19.3.0"
 gson = "2.13.1"
 materialIconsExtended = "1.7.8"
+ui = "1.8.3"
+runtime = "1.8.3"
 
 [libraries]
 accompanist-permissions = { module = "com.google.accompanist:accompanist-permissions", version.ref = "accompanistPermissions" }
@@ -33,6 +35,8 @@ ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
 ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest" }
 ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
 androidx-compose-material-icons-extended = { module = "androidx.compose.material:material-icons-extended", version.ref = "materialIconsExtended" }
+androidx-ui = { group = "androidx.compose.ui", name = "ui", version.ref = "ui" }
+androidx-runtime = { group = "androidx.compose.runtime", name = "runtime", version.ref = "runtime" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

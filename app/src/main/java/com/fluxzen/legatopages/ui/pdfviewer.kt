@@ -31,6 +31,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonColors
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -85,6 +86,121 @@ private val ARROW_ICON_SIZE = 48.dp
 private const val ANIMATION_LABEL_PERMANENT_CONTROLS = "PermanentControlAlpha"
 
 @Composable
+private fun PdfViewerControls(
+    controlsVisible: Boolean,
+    permanentControlAlpha: Float,
+    transparentButtonColors: ButtonColors,
+    isLocalViewingOnly: Boolean,
+    isLeader: Boolean,
+    statusText: String,
+    pageStatus: String,
+    onTurnPagePrevious: () -> Unit,
+    onTurnPageNext: () -> Unit,
+    onStartLeadingClicked: () -> Unit,
+    onFindSessionClicked: () -> Unit,
+    onStopLeadingClicked: () -> Unit,
+    onLeaveSessionClicked: () -> Unit,
+    onLoadDifferentPdfClicked: () -> Unit,
+    onPageIndicatorClicked: () -> Unit
+) {
+    val isFollower = !isLocalViewingOnly && !isLeader
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(
+                onClick = onTurnPagePrevious,
+                modifier = Modifier
+                    .background(Color.Black.copy(alpha = permanentControlAlpha), CircleShape)
+                    .alpha(permanentControlAlpha)
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                    contentDescription = stringResource(R.string.previous_page_description),
+                    tint = Color.White,
+                    modifier = Modifier.size(ARROW_ICON_SIZE)
+                )
+            }
+
+            AnimatedVisibility(
+                visible = controlsVisible,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    when {
+                        isLocalViewingOnly -> {
+                            Button(onClick = onStartLeadingClicked, colors = transparentButtonColors) { Text(stringResource(R.string.button_start_leading)) }
+                            Button(onClick = onFindSessionClicked, colors = transparentButtonColors) { Text(stringResource(R.string.button_find_session)) }
+                        }
+                        isLeader -> {
+                            Button(onClick = onStopLeadingClicked, colors = transparentButtonColors) { Text(stringResource(R.string.button_stop_leading)) }
+                        }
+                        else -> {
+                            Button(onClick = onLeaveSessionClicked, colors = transparentButtonColors) { Text(stringResource(R.string.button_leave_session)) }
+                        }
+                    }
+                    Button(onClick = onLoadDifferentPdfClicked, colors = transparentButtonColors) { Text(stringResource(R.string.button_load_new_pdf)) }
+                }
+            }
+
+            IconButton(
+                onClick = onTurnPageNext,
+                modifier = Modifier
+                    .background(Color.Black.copy(alpha = permanentControlAlpha), CircleShape)
+                    .alpha(permanentControlAlpha)
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = stringResource(R.string.next_page_description),
+                    tint = Color.White,
+                    modifier = Modifier.size(ARROW_ICON_SIZE)
+                )
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth(STATUS_BAR_WIDTH_FRACTION)
+                .background(
+                    Color.Black.copy(alpha = permanentControlAlpha),
+                    RoundedCornerShape(8.dp)
+                )
+                .alpha(permanentControlAlpha)
+                .padding(vertical = 4.dp, horizontal = 12.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "$statusText | ",
+                color = Color.White,
+                style = MaterialTheme.typography.bodySmall
+            )
+            Text(
+                text = pageStatus,
+                color = Color.White,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier
+                    .clickable(enabled = !isFollower) { onPageIndicatorClicked() }
+                    .padding(start = 4.dp)
+            )
+        }
+    }
+}
+
+@Composable
 fun PdfViewerScreen(
     pdfUri: Uri,
     bookPage: Int,
@@ -120,13 +236,10 @@ fun PdfViewerScreen(
     val currentOnTurnPage by rememberUpdatedState(onTurnPage)
     val currentDeviceArrangement by rememberUpdatedState(deviceArrangement)
 
-    val (thisDeviceIndex, _) = if (isLocalViewingOnly) {
-        0 to 1
+    val thisDeviceIndex = if (isLocalViewingOnly) {
+        0
     } else {
-        val index =
-            currentDeviceArrangement.indexOfFirst { it.isThisDevice }.takeIf { it != -1 } ?: 0
-        val count = currentDeviceArrangement.size.coerceAtLeast(1)
-        index to count
+        currentDeviceArrangement.indexOfFirst { it.isThisDevice }.takeIf { it != -1 } ?: 0
     }
 
     val actualPageIndex = currentBookPage + thisDeviceIndex
@@ -135,7 +248,6 @@ fun PdfViewerScreen(
     val density = LocalDensity.current
     val coroutineScope = rememberCoroutineScope()
     var hideControlsJob by remember { mutableStateOf<Job?>(null) }
-    val isFollower = !isLocalViewingOnly && !isLeader
 
     fun scheduleHideControls() {
         hideControlsJob?.cancel()
@@ -255,126 +367,32 @@ fun PdfViewerScreen(
             )
         } else if (!isLoading) {
             Text(
-                "End of document",
+                stringResource(R.string.end_of_document),
                 modifier = Modifier.align(Alignment.Center),
                 color = Color.White
             )
         }
 
         Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(bottom = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+            modifier = Modifier.align(Alignment.BottomCenter)
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(
-                    onClick = ::turnPagePrevious,
-                    modifier = Modifier
-                        .background(Color.Black.copy(alpha = permanentControlAlpha), CircleShape)
-                        .alpha(permanentControlAlpha)
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                        contentDescription = "Previous Page",
-                        tint = Color.White,
-                        modifier = Modifier.size(ARROW_ICON_SIZE)
-                    )
-                }
-
-                AnimatedVisibility(
-                    visible = controlsVisible,
-                    enter = fadeIn(),
-                    exit = fadeOut()
-                ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        when {
-                            isLocalViewingOnly -> {
-                                Button(
-                                    onClick = onStartLeadingClicked,
-                                    colors = transparentButtonColors
-                                ) { Text("Start Leading") }
-                                Button(
-                                    onClick = onFindSessionClicked,
-                                    colors = transparentButtonColors
-                                ) { Text("Find Session") }
-                            }
-
-                            isLeader -> {
-                                Button(
-                                    onClick = onStopLeadingClicked,
-                                    colors = transparentButtonColors
-                                ) { Text("Stop Leading") }
-                            }
-
-                            else -> {
-                                Button(
-                                    onClick = onLeaveSessionClicked,
-                                    colors = transparentButtonColors
-                                ) { Text("Leave Session") }
-                            }
-                        }
-                        Button(
-                            onClick = onLoadDifferentPdfClicked,
-                            colors = transparentButtonColors
-                        ) { Text("Load New") }
-                    }
-                }
-
-                IconButton(
-                    onClick = ::turnPageNext,
-                    modifier = Modifier
-                        .background(Color.Black.copy(alpha = permanentControlAlpha), CircleShape)
-                        .alpha(permanentControlAlpha)
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = "Next Page",
-                        tint = Color.White,
-                        modifier = Modifier.size(ARROW_ICON_SIZE)
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth(STATUS_BAR_WIDTH_FRACTION)
-                    .background(
-                        Color.Black.copy(alpha = permanentControlAlpha),
-                        RoundedCornerShape(8.dp)
-                    )
-                    .alpha(permanentControlAlpha)
-                    .padding(vertical = 4.dp, horizontal = 12.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "$statusText | ",
-                    color = Color.White,
-                    style = MaterialTheme.typography.bodySmall
-                )
-                Text(
-                    text = "Page ${actualPageIndex + 1}/${renderer.pageCount}",
-                    color = Color.White,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier
-                        .clickable(enabled = !isFollower) {
-                            if (!isFollower) {
-                                showPageDialog = true
-                            }
-                        }
-                        .padding(start = 4.dp)
-                )
-            }
+            PdfViewerControls(
+                controlsVisible = controlsVisible,
+                permanentControlAlpha = permanentControlAlpha,
+                transparentButtonColors = transparentButtonColors,
+                isLocalViewingOnly = isLocalViewingOnly,
+                isLeader = isLeader,
+                statusText = statusText,
+                pageStatus = stringResource(R.string.status_bar_page_indicator, actualPageIndex + 1, renderer.pageCount),
+                onTurnPagePrevious = ::turnPagePrevious,
+                onTurnPageNext = ::turnPageNext,
+                onStartLeadingClicked = onStartLeadingClicked,
+                onFindSessionClicked = onFindSessionClicked,
+                onStopLeadingClicked = onStopLeadingClicked,
+                onLeaveSessionClicked = onLeaveSessionClicked,
+                onLoadDifferentPdfClicked = onLoadDifferentPdfClicked,
+                onPageIndicatorClicked = { showPageDialog = true }
+            )
         }
 
         if (showPageDialog) {

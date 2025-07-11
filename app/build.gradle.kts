@@ -65,6 +65,8 @@ dependencies {
     implementation(libs.gson)
     implementation(libs.androidx.pdf.viewer)
     implementation(libs.androidx.compose.material.icons.extended)
+    implementation(libs.androidx.ui)
+    implementation(libs.androidx.runtime)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

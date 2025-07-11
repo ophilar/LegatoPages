@@ -163,25 +163,6 @@ class CacheManager(private val context: Context) {
         }
     }
 
-    fun getCachedFile(fileName: String, expectedHash: String): File? {
-        val file = File(cacheDir, fileName)
-        if (!file.exists()) return null
-
-
-        try {
-            file.inputStream().use {
-                if (getFileHash(it) == expectedHash) {
-                    file.setLastModified(System.currentTimeMillis())
-                    return file
-                }
-            }
-        } catch (e: IOException) {
-            Log.e("CacheManager", "Error reading cached file for hashing: ${file.name}", e)
-            return null
-        }
-        return null
-    }
-
     fun cleanCache() {
         val cutoff = System.currentTimeMillis() - cacheDuration
         cacheDir.listFiles()?.forEach { file ->

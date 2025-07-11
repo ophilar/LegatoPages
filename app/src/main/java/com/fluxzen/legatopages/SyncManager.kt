@@ -17,9 +17,21 @@ import com.google.android.gms.nearby.connection.Payload
 import com.google.android.gms.nearby.connection.PayloadCallback
 import com.google.android.gms.nearby.connection.PayloadTransferUpdate
 import com.google.android.gms.nearby.connection.Strategy
-import com.google.gson.Gson
+import com.google.gson.GsonBuilder
 import java.io.File
 import java.nio.charset.StandardCharsets
+import com.google.gson.JsonDeserializationContext
+import com.google.gson.JsonDeserializer
+import com.google.gson.JsonElement
+import com.google.gson.JsonParseException
+import com.google.gson.JsonSerializationContext
+import com.google.gson.JsonSerializer
+import java.lang.reflect.Type
+import kotlin.compareTo
+import kotlin.div
+import kotlin.invoke
+import kotlin.text.set
+import kotlin.times
 
 private const val SERVICE_ID = "com.fluxzen.legatopages.SERVICE_ID"
 private const val DISCOVERY_TIMEOUT_MS = 10000L
@@ -33,14 +45,75 @@ data class Device(
 )
 
 private sealed class SyncMessage {
-    data class FileInfo(val fileName: String, val fileSize: Long, val fileHash: String) :
-        SyncMessage()
+    abstract val type: String
 
-    object FileRequest : SyncMessage()
-    data class PageChanged(val bookPage: Int) : SyncMessage()
-    data class ArrangementUpdate(val devices: List<Device>) : SyncMessage()
-    object PageTurnNextRequest : SyncMessage()
-    object PageTurnPrevRequest : SyncMessage()
+    data class FileInfo(
+        val fileName: String,
+        val fileSize: Long,
+        val fileHash: String,
+        override val type: String = "file_info"
+    ) : SyncMessage()
+
+    object FileRequest : SyncMessage() {
+        override val type: String = "file_request"
+    }
+
+    data class PageChanged(
+        val bookPage: Int,
+        override val type: String = "page_changed"
+    ) : SyncMessage()
+
+    data class ArrangementUpdate(
+        val devices: List<Device>,
+        override val type: String = "arrangement_update"
+    ) : SyncMessage()
+
+    object PageTurnNextRequest : SyncMessage() {
+        override val type: String = "page_turn_next"
+    }
+
+    object PageTurnPrevRequest : SyncMessage() {
+        override val type: String = "page_turn_prev"
+    }
+}
+
+private class SyncMessageDeserializer : JsonDeserializer<SyncMessage> {
+    override fun deserialize(
+        json: JsonElement?,
+        typeOfT: Type?,
+        context: JsonDeserializationContext?
+    ): SyncMessage {
+        val jsonObject = json?.asJsonObject ?: throw JsonParseException("Null JSON object")
+        val type = jsonObject.get("type")?.asString ?: throw JsonParseException("SyncMessage type not found")
+
+        return when (type) {
+            "file_info" ->          context!!.deserialize(jsonObject, SyncMessage.FileInfo::class.java)
+            "file_request" ->       context!!.deserialize(jsonObject, SyncMessage.FileRequest::class.java)
+            "page_changed" ->       context!!.deserialize(jsonObject, SyncMessage.PageChanged::class.java)
+            "arrangement_update" -> context!!.deserialize(jsonObject, SyncMessage.ArrangementUpdate::class.java)
+            "page_turn_next" ->     context!!.deserialize(jsonObject, SyncMessage.PageTurnNextRequest::class.java)
+            "page_turn_prev" ->     context!!.deserialize(jsonObject, SyncMessage.PageTurnPrevRequest::class.java)
+            else -> throw JsonParseException("Unknown SyncMessage type: $type")
+        }
+    }
+}
+private class SyncMessageSerializer : JsonSerializer<SyncMessage> {
+    override fun serialize(
+        src: SyncMessage,
+        typeOfSrc: Type,
+        context: JsonSerializationContext
+    ): JsonElement {
+        val jsonObject = when (src) {
+            is SyncMessage.FileRequest,
+            is SyncMessage.PageTurnNextRequest,
+            is SyncMessage.PageTurnPrevRequest -> {
+                com.google.gson.JsonObject()
+            }
+            else -> context.serialize(src, src.javaClass).asJsonObject
+        }
+        jsonObject.addProperty("type", src.type)
+        return jsonObject
+    }
 }
 
 class SyncManager(private val context: Context) {
@@ -60,9 +133,9 @@ class SyncManager(private val context: Context) {
     private val myDeviceName = Build.MODEL
 
     private val connectionsClient = Nearby.getConnectionsClient(context)
-    private val serviceId = "com.fluxzen.legatopages.SERVICE_ID"
+
     private val strategy = Strategy.P2P_CLUSTER
-    private val gson = Gson()
+
     private val cacheManager = CacheManager(context)
     private val pdfPreferences = PdfPreferences(context)
 
@@ -75,6 +148,14 @@ class SyncManager(private val context: Context) {
     private val incomingFilePayloads = mutableMapOf<Long, Payload>()
     private val completedFilePayloads = mutableMapOf<Long, File>()
     private val pendingConnections = mutableMapOf<String, String>()
+
+    private val gson = GsonBuilder()
+        .registerTypeAdapter(SyncMessage::class.java, SyncMessageDeserializer())
+        .registerTypeAdapter(SyncMessage::class.java, SyncMessageSerializer())
+        .registerTypeAdapter(SyncMessage.FileRequest::class.java, SyncMessageSerializer())
+        .registerTypeAdapter(SyncMessage.PageTurnNextRequest::class.java, SyncMessageSerializer())
+        .registerTypeAdapter(SyncMessage.PageTurnPrevRequest::class.java, SyncMessageSerializer())
+        .create()
 
     fun loadFile(uri: Uri): Boolean {
         return try {
@@ -144,12 +225,18 @@ class SyncManager(private val context: Context) {
                     onStatusUpdate?.invoke("Receiving file...")
                     incomingFilePayloads[payload.id] = payload
                 }
-
+                Payload.Type.FILE -> {
+                    onStatusUpdate?.invoke("Receiving file...")
+                    incomingFilePayloads[payload.id] = payload
+                }
                 else -> Log.w("SyncManager", "Unhandled payload type: ${payload.type}")
             }
         }
 
         override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {
+            Log.d("SyncManager_Transfer", "Endpoint: $endpointId, Payload ID: ${update.payloadId}, Status: ${update.status}, Bytes: ${update.bytesTransferred}/${update.totalBytes}")
+            val percent = if (update.totalBytes > 0) (update.bytesTransferred * 100 / update.totalBytes) else 0
+
             if (update.status == PayloadTransferUpdate.Status.SUCCESS) {
                 val payloadId = update.payloadId
                 val payload = incomingFilePayloads.remove(payloadId) ?: return
@@ -167,6 +254,8 @@ class SyncManager(private val context: Context) {
                 val percent = (update.bytesTransferred * 100) / update.totalBytes
                 onStatusUpdate?.invoke("Receiving file... $percent%")
             } else if (update.status == PayloadTransferUpdate.Status.FAILURE || update.status == PayloadTransferUpdate.Status.CANCELED) {
+                Log.e("SyncManager_Transfer", "Transfer failed/canceled. Endpoint: $endpointId, Payload ID: ${update.payloadId}")
+
                 Log.w(
                     "SyncManager",
                     "Payload transfer not SUCCESS: ${update.status} for payload ID: ${update.payloadId}"
@@ -182,6 +271,9 @@ class SyncManager(private val context: Context) {
 
     private fun handleBytePayload(endpointId: String, bytes: ByteArray) {
         val json = bytes.toString(StandardCharsets.UTF_8)
+
+        Log.d("SyncManager_Debug", "RECEIVED_JSON from $endpointId: $json")
+
         val message = try {
             gson.fromJson(json, SyncMessage::class.java)
         } catch (e: Exception) {
@@ -205,13 +297,30 @@ class SyncManager(private val context: Context) {
             is SyncMessage.FileRequest -> {
                 if (!isLeader) return
                 val fileUri = currentFileUri ?: return
+                val file = File(fileUri.path ?: "")
+                if (!file.exists() || file.length() == 0L) {
+                    Log.e("SyncManager_FileSend", "File does not exist or is empty: ${file.absolutePath}")
+                    onStatusUpdate?.invoke("Cannot send file: file missing or empty.")
+                    return
+                }
+                Log.d("SyncManager_FileSend", "File ready to send: ${file.absolutePath}, size: ${file.length()}")
                 try {
-                    context.contentResolver.openFileDescriptor(fileUri, "r")?.use { pfd ->
-                        val filePayload = Payload.fromStream(pfd)
-                        connectionsClient.sendPayload(endpointId, filePayload)
-                        onStatusUpdate?.invoke("Sending file to $endpointId...")
-                    } ?: onStatusUpdate?.invoke("Failed to open file for sending.")
+                    val filePayload = Payload.fromFile(file)
+                    Log.d("SyncManager_FileSend", "Sending file: $fileUri, Payload ID: ${filePayload.id}")
+                    connectionsClient.sendPayload(endpointId, filePayload)
+                    onStatusUpdate?.invoke("Sending file to $endpointId...")
+
+//                    context.contentResolver.openFileDescriptor(fileUri, "r")?.use { pfd ->
+//                        val filePayload = Payload.fromStream(pfd)
+//
+//                        Log.d("SyncManager_FileSend", "Sending file: $fileUri, Payload ID: ${filePayload.id}")
+//
+//                        connectionsClient.sendPayload(endpointId, filePayload)
+//                        onStatusUpdate?.invoke("Sending file to $endpointId...")
+//                    } ?: onStatusUpdate?.invoke("Failed to open file for sending.")
                 } catch (e: Exception) {
+                    Log.e("SyncManager_FileSend", "Error sending file: $fileUri", e)
+
                     Log.e("SyncManager", "Error sending file", e)
                     onStatusUpdate?.invoke("Error sending file: ${e.message}")
                 }
@@ -230,14 +339,14 @@ class SyncManager(private val context: Context) {
                 onDeviceArrangementChanged?.invoke(processedList)
             }
 
-            SyncMessage.PageTurnNextRequest -> {
+            is SyncMessage.PageTurnNextRequest -> {
                 if (isLeader) {
                     onTurnRequestReceived?.invoke(PageTurnDirection.NEXT)
                 }
 
             }
 
-            SyncMessage.PageTurnPrevRequest -> {
+            is SyncMessage.PageTurnPrevRequest -> {
                 if (isLeader) {
                     onTurnRequestReceived?.invoke(PageTurnDirection.PREVIOUS)
                 }
@@ -247,6 +356,7 @@ class SyncManager(private val context: Context) {
 
     private val connectionLifecycleCallback = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(endpointId: String, connectionInfo: ConnectionInfo) {
+            Log.d("SyncManager", "onConnectionInitiated - Endpoint ID: $endpointId, Name: ${connectionInfo.endpointName}")
             onStatusUpdate?.invoke("Accepting connection to ${connectionInfo.endpointName}")
             pendingConnections[endpointId] = connectionInfo.endpointName
             connectionsClient.acceptConnection(endpointId, payloadCallback)
@@ -255,6 +365,7 @@ class SyncManager(private val context: Context) {
         override fun onConnectionResult(endpointId: String, result: ConnectionResolution) {
             val deviceName = pendingConnections.remove(endpointId) ?: "Unknown Device"
             if (result.status.statusCode == ConnectionsStatusCodes.STATUS_OK) {
+                Log.d("SyncManager", "onConnectionResult SUCCESS - Connected to $deviceName ($endpointId)")
                 onStatusUpdate?.invoke("Connected to $deviceName.")
                 if (isLeader) {
                     val newDevice = Device(endpointId, deviceName)
@@ -275,6 +386,7 @@ class SyncManager(private val context: Context) {
                     onLeaderFound?.invoke(endpointId)
                 }
             } else {
+                Log.e("SyncManager", "onConnectionResult FAILURE - $deviceName: ${result.status.statusMessage}")
                 onStatusUpdate?.invoke("Connection to $deviceName failed: ${result.status.statusMessage}")
                 connectedEndpoints.removeAll { it.endpointId == endpointId }
                 if (isLeader) {
@@ -288,6 +400,8 @@ class SyncManager(private val context: Context) {
         override fun onDisconnected(endpointId: String) {
             val deviceName = connectedEndpoints.find { it.endpointId == endpointId }?.deviceName
                 ?: pendingConnections[endpointId] ?: "a device"
+            Log.d("SyncManager", "onDisconnected - $deviceName ($endpointId) disconnected")
+
             onStatusUpdate?.invoke("$deviceName disconnected.")
             connectedEndpoints.removeAll { it.endpointId == endpointId }
             pendingConnections.remove(endpointId)
@@ -308,7 +422,7 @@ class SyncManager(private val context: Context) {
         isLeader = true
         val advertisingOptions = AdvertisingOptions.Builder().setStrategy(strategy).build()
         connectionsClient.startAdvertising(
-            myDeviceName, serviceId, connectionLifecycleCallback, advertisingOptions
+            myDeviceName, SERVICE_ID, connectionLifecycleCallback, advertisingOptions
         ).addOnSuccessListener {
             onStatusUpdate?.invoke("Advertising started. Waiting for followers.")
             onAdvertisingStarted?.invoke()
@@ -325,9 +439,13 @@ class SyncManager(private val context: Context) {
         isLeader = false
         leaderEndpointId = null
         val discoveryOptions = DiscoveryOptions.Builder().setStrategy(strategy).build()
+        Log.d("SyncManager", "Starting discovery with SERVICE_ID: $SERVICE_ID")
+
         connectionsClient.startDiscovery(
-            serviceId, object : EndpointDiscoveryCallback() {
+            SERVICE_ID, object : EndpointDiscoveryCallback() {
                 override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
+                    Log.d("SyncManager", "Discovered endpoint: $endpointId with name: ${info.endpointName}")
+
                     onStatusUpdate?.invoke("Found leader: ${info.endpointName}. Connecting...")
                     connectionsClient.requestConnection(
                         myDeviceName,
@@ -335,22 +453,32 @@ class SyncManager(private val context: Context) {
                         connectionLifecycleCallback
                     )
                         .addOnFailureListener { e ->
+                            Log.e("SyncManager", "Connection request failed for ${info.endpointName}: ${e.message}")
+
                             onStatusUpdate?.invoke("Connection request to ${info.endpointName} failed: ${e.message}. Restarting discovery might be needed if no other leaders are found.")
                         }
                 }
 
                 override fun onEndpointLost(endpointId: String) {
+                    Log.w("SyncManager", "Endpoint lost: $endpointId")
+
                     onStatusUpdate?.invoke("Leader $endpointId lost during discovery.")
                 }
             }, discoveryOptions
         ).addOnSuccessListener {
+            Log.d("SyncManager", "Discovery started successfully")
+
             onStatusUpdate?.invoke("Searching for a leader...")
             android.os.Handler(context.mainLooper).postDelayed({
                 if (leaderEndpointId == null && !isLeader) {
+                    Log.d("SyncManager", "No leader found within timeout")
+
                     onNoLeaderFound?.invoke()
                 }
-            }, 10000)
+            }, DISCOVERY_TIMEOUT_MS)
         }.addOnFailureListener { e ->
+            Log.e("SyncManager", "Failed to start discovery: ${e.message}")
+
             onStatusUpdate?.invoke("Discovery failed to start: ${e.message}")
             onNoLeaderFound?.invoke()
         }
@@ -382,7 +510,10 @@ class SyncManager(private val context: Context) {
     }
 
     private fun sendMessageToAll(message: SyncMessage) {
+
         if (connectedEndpoints.isNotEmpty()) {
+
+            Log.d("SyncManager_Debug", "SENDING_TO_ALL: ${message::class.java.simpleName}")
             val payload =
                 Payload.fromBytes(gson.toJson(message).toByteArray(StandardCharsets.UTF_8))
             connectionsClient.sendPayload(connectedEndpoints.map { it.endpointId }, payload)
@@ -390,7 +521,14 @@ class SyncManager(private val context: Context) {
     }
 
     private fun sendMessage(endpointId: String, message: SyncMessage) {
-        val payload = Payload.fromBytes(gson.toJson(message).toByteArray(StandardCharsets.UTF_8))
+        Log.d("SyncManager_Debug", "SENDING_TO_ONE ($endpointId): ${message::class.java.simpleName}")
+
+        val json = gson.toJson(message)
+
+        Log.d("SyncManager_Message", "Sending message to $endpointId: ${message::class.java.simpleName}, JSON: $json")
+
+        Log.d("SyncManager_Debug", "Serialized message: $json")
+        val payload = Payload.fromBytes(json.toByteArray(StandardCharsets.UTF_8))
         connectionsClient.sendPayload(endpointId, payload)
     }
 
