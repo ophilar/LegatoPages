@@ -377,11 +377,9 @@ class SyncManager(private val context: Context) {
                     }
                     onFollowerJoined?.invoke(newDevice)
                     broadcastDeviceArrangement()
-                    currentFileInfo?.let { info ->
-                        sendMessage(endpointId, info)
-                       
-                        val currentPageForLeader = pdfPreferences.getPageForFile(info.fileHash)
-                        sendMessage(endpointId, SyncMessage.PageChanged(currentPageForLeader))
+                    currentFileInfo?.let { info -> sendMessage(endpointId, info)
+//                        val currentPageForLeader = pdfPreferences.getPageForFile(info.fileHash)
+//                        sendMessage(endpointId, SyncMessage.PageChanged(currentPageForLeader))
                     }
                 } else {
                     connectionsClient.stopDiscovery()

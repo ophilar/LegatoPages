@@ -68,6 +68,7 @@ enum class PageTurnDirection {
 fun MainScreen() {
     var screenState by remember { mutableStateOf<ScreenState>(ScreenState.Permission()) }
     var deviceArrangement by remember { mutableStateOf(listOf<Device>()) }
+    var pendingPageNumber by remember { mutableStateOf<Int?>(null) }
 
     val context = LocalContext.current
     val pdfPreferences = remember { PdfPreferences(context.applicationContext) }
@@ -76,17 +77,17 @@ fun MainScreen() {
     val viewModel: MainViewModel = viewModel()
     val syncManager = viewModel.syncManager
 
-    fun updateStateAndSavePdf(file: File, isLocal: Boolean) {
+    fun updateStateAndSavePdf(file: File, isLocal: Boolean, initialPage: Int? = null) {
         val fileUri = Uri.fromFile(file)
         val fileHash = cacheManager.getFileHash(file.inputStream())
 
-        val pageToLoad = if (isLocal) 0 else pdfPreferences.getPageForFile(fileHash)
+        val pageToLoad = initialPage ?: if (isLocal) 0 else pdfPreferences.getPageForFile(fileHash)
 
         val newScreenState = ScreenState.PdfViewer(
             pdfUri = fileUri,
             bookPage = pageToLoad,
             isActuallyLeading = false,
-            statusText = if (isLocal) "PDF loaded. Start leading or find a session." else "File received. Waiting for page sync...",
+            statusText = if (isLocal) "PDF loaded. Start leading or find a session." else "File received. Syncing page...",
             fileHash = fileHash,
             isLocalViewingOnly = isLocal
         )
@@ -122,9 +123,12 @@ fun MainScreen() {
             executePageTurn(direction)
         }
         syncManager.onPageTurnReceived = { pageTurn ->
-            (screenState as? ScreenState.PdfViewer)?.let {
-                screenState = it.copy(bookPage = pageTurn.bookPage)
-                pdfPreferences.savePageForFile(it.fileHash, pageTurn.bookPage)
+            val currentState = screenState
+            if (currentState is ScreenState.PdfViewer) {
+                screenState = currentState.copy(bookPage = pageTurn.bookPage)
+                pdfPreferences.savePageForFile(currentState.fileHash, pageTurn.bookPage)
+            } else {
+                pendingPageNumber = pageTurn.bookPage
             }
         }
         syncManager.onDeviceArrangementChanged = { devices -> deviceArrangement = devices }
@@ -137,11 +141,15 @@ fun MainScreen() {
             }
         }
         syncManager.onFileReceived = { file: File ->
-            updateStateAndSavePdf(file, isLocal = false)
+            updateStateAndSavePdf(file, isLocal = false, pendingPageNumber)
+            pendingPageNumber = null
         }
         syncManager.onFollowerJoined = { device ->
             (screenState as? ScreenState.PdfViewer)?.let {
                 screenState = it.copy(statusText = "Follower joined: ${device.deviceName}")
+                if (it.isActuallyLeading) {
+                    syncManager.broadcastPageTurn(PageTurn(it.bookPage))
+                }
             }
         }
         syncManager.onLeaderFound = {
@@ -384,12 +392,6 @@ fun MainScreen() {
         }
         onDispose {
             activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        }
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            syncManager.shutdown()
         }
     }
 }
