@@ -3,6 +3,8 @@ package com.fluxzen.legatopages
 import android.Manifest
 import android.net.Uri
 import android.os.Build
+import android.view.WindowManager
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
@@ -34,6 +36,7 @@ import com.fluxzen.legatopages.ui.PdfViewerScreen
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import java.io.File
+import androidx.lifecycle.viewmodel.compose.viewModel
 
 private const val PDF_MIME_TYPE = "application/pdf"
 
@@ -70,9 +73,8 @@ fun MainScreen() {
     val pdfPreferences = remember { PdfPreferences(context.applicationContext) }
     val cacheManager = remember { CacheManager(context.applicationContext) }
 
-    val syncManager = remember(context.applicationContext) {
-        SyncManager(context.applicationContext)
-    }
+    val viewModel: MainViewModel = viewModel()
+    val syncManager = viewModel.syncManager
 
     fun updateStateAndSavePdf(file: File, isLocal: Boolean) {
         val fileUri = Uri.fromFile(file)
@@ -364,6 +366,24 @@ fun MainScreen() {
                     }
                 )
             }
+        }
+    }
+
+    val activity = LocalActivity.current
+   
+    DisposableEffect(screenState) {
+        val shouldKeepScreenOn = screenState is ScreenState.PdfViewer
+        val isLocalViewing = (screenState as? ScreenState.PdfViewer)?.isLocalViewingOnly ?: true
+
+        val keepScreenOn = shouldKeepScreenOn && !isLocalViewing
+
+        if (keepScreenOn) {
+            activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose {
+            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
     }
 

@@ -27,11 +27,6 @@ import com.google.gson.JsonParseException
 import com.google.gson.JsonSerializationContext
 import com.google.gson.JsonSerializer
 import java.lang.reflect.Type
-import kotlin.compareTo
-import kotlin.div
-import kotlin.invoke
-import kotlin.text.set
-import kotlin.times
 
 private const val SERVICE_ID = "com.fluxzen.legatopages.SERVICE_ID"
 private const val DISCOVERY_TIMEOUT_MS = 10000L
@@ -145,6 +140,8 @@ class SyncManager(private val context: Context) {
     private var currentFileInfo: SyncMessage.FileInfo? = null
 
     private val connectedEndpoints = mutableListOf<Device>()
+   
+    private val outgoingFilePayloads = mutableMapOf<Long, String>()
     private val incomingFilePayloads = mutableMapOf<Long, Payload>()
     private val completedFilePayloads = mutableMapOf<Long, File>()
     private val pendingConnections = mutableMapOf<String, String>()
@@ -237,34 +234,48 @@ class SyncManager(private val context: Context) {
             Log.d("SyncManager_Transfer", "Endpoint: $endpointId, Payload ID: ${update.payloadId}, Status: ${update.status}, Bytes: ${update.bytesTransferred}/${update.totalBytes}")
             val percent = if (update.totalBytes > 0) (update.bytesTransferred * 100 / update.totalBytes) else 0
 
-            if (update.status == PayloadTransferUpdate.Status.SUCCESS) {
-                val payloadId = update.payloadId
-                val payload = incomingFilePayloads.remove(payloadId) ?: return
-
-                val receivedFile = cacheManager.saveReceivedFile(payload)
-                if (receivedFile != null) {
-                    completedFilePayloads[payloadId] = receivedFile
-                    onStatusUpdate?.invoke("File received successfully.")
-                    onFileReceived?.invoke(receivedFile)
-                } else {
-                    Log.e("SyncManager", "Failed to save received file for payload ID: $payloadId")
-                    onStatusUpdate?.invoke("File reception failed.")
+            if (outgoingFilePayloads.containsKey(update.payloadId)) {
+               
+                when (update.status) {
+                    PayloadTransferUpdate.Status.IN_PROGRESS -> {
+                        onStatusUpdate?.invoke("Sending file... $percent%")
+                    }
+                    PayloadTransferUpdate.Status.SUCCESS -> {
+                        onStatusUpdate?.invoke("File sent successfully.")
+                        outgoingFilePayloads.remove(update.payloadId)
+                    }
+                    PayloadTransferUpdate.Status.FAILURE, PayloadTransferUpdate.Status.CANCELED -> {
+                        onStatusUpdate?.invoke("File send failed.")
+                        outgoingFilePayloads.remove(update.payloadId)
+                    }
                 }
-            } else if (update.status == PayloadTransferUpdate.Status.IN_PROGRESS) {
-                val percent = (update.bytesTransferred * 100) / update.totalBytes
-                onStatusUpdate?.invoke("Receiving file... $percent%")
-            } else if (update.status == PayloadTransferUpdate.Status.FAILURE || update.status == PayloadTransferUpdate.Status.CANCELED) {
-                Log.e("SyncManager_Transfer", "Transfer failed/canceled. Endpoint: $endpointId, Payload ID: ${update.payloadId}")
+            } else if (incomingFilePayloads.containsKey(update.payloadId)) {
+               
+                when (update.status) {
+                    PayloadTransferUpdate.Status.IN_PROGRESS -> {
+                        onStatusUpdate?.invoke("Receiving file... $percent%")
+                    }
+                    PayloadTransferUpdate.Status.SUCCESS -> {
+                        val payloadId = update.payloadId
+                        val payload = incomingFilePayloads.remove(payloadId) ?: return
 
-                Log.w(
-                    "SyncManager",
-                    "Payload transfer not SUCCESS: ${update.status} for payload ID: ${update.payloadId}"
-                )
-                incomingFilePayloads.remove(update.payloadId)
-                completedFilePayloads.remove(update.payloadId)
-                onStatusUpdate?.invoke("File transfer failed.")
-            } else {
-                Log.w("SyncManager", "Unhandled payload transfer update: ${update.status}")
+                        val receivedFile = cacheManager.saveReceivedFile(payload)
+                        if (receivedFile != null) {
+                            completedFilePayloads[payloadId] = receivedFile
+                            onStatusUpdate?.invoke("File received successfully.")
+                            onFileReceived?.invoke(receivedFile)
+                        } else {
+                            Log.e("SyncManager", "Failed to save received file for payload ID: $payloadId")
+                            onStatusUpdate?.invoke("File reception failed.")
+                        }
+                    }
+                    PayloadTransferUpdate.Status.FAILURE, PayloadTransferUpdate.Status.CANCELED -> {
+                        Log.e("SyncManager_Transfer", "Transfer failed/canceled. Endpoint: $endpointId, Payload ID: ${update.payloadId}")
+                        incomingFilePayloads.remove(update.payloadId)
+                        completedFilePayloads.remove(update.payloadId)
+                        onStatusUpdate?.invoke("File receive failed.")
+                    }
+                }
             }
         }
     }
@@ -306,18 +317,10 @@ class SyncManager(private val context: Context) {
                 Log.d("SyncManager_FileSend", "File ready to send: ${file.absolutePath}, size: ${file.length()}")
                 try {
                     val filePayload = Payload.fromFile(file)
+                    outgoingFilePayloads[filePayload.id] = endpointId
                     Log.d("SyncManager_FileSend", "Sending file: $fileUri, Payload ID: ${filePayload.id}")
                     connectionsClient.sendPayload(endpointId, filePayload)
-                    onStatusUpdate?.invoke("Sending file to $endpointId...")
-
-//                    context.contentResolver.openFileDescriptor(fileUri, "r")?.use { pfd ->
-//                        val filePayload = Payload.fromStream(pfd)
-//
-//                        Log.d("SyncManager_FileSend", "Sending file: $fileUri, Payload ID: ${filePayload.id}")
-//
-//                        connectionsClient.sendPayload(endpointId, filePayload)
-//                        onStatusUpdate?.invoke("Sending file to $endpointId...")
-//                    } ?: onStatusUpdate?.invoke("Failed to open file for sending.")
+                    onStatusUpdate?.invoke("Sending file to $endpointId... 0%")
                 } catch (e: Exception) {
                     Log.e("SyncManager_FileSend", "Error sending file: $fileUri", e)
 
@@ -376,7 +379,7 @@ class SyncManager(private val context: Context) {
                     broadcastDeviceArrangement()
                     currentFileInfo?.let { info ->
                         sendMessage(endpointId, info)
-
+                       
                         val currentPageForLeader = pdfPreferences.getPageForFile(info.fileHash)
                         sendMessage(endpointId, SyncMessage.PageChanged(currentPageForLeader))
                     }
