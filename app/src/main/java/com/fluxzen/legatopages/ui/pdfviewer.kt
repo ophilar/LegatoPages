@@ -95,13 +95,14 @@ private fun PdfViewerControls(
     statusText: String,
     pageStatus: String,
     onTurnPagePrevious: () -> Unit,
+    isNextPageAvailable: Boolean,
     onTurnPageNext: () -> Unit,
     onStartLeadingClicked: () -> Unit,
     onFindSessionClicked: () -> Unit,
     onStopLeadingClicked: () -> Unit,
     onLeaveSessionClicked: () -> Unit,
     onLoadDifferentPdfClicked: () -> Unit,
-    onPageIndicatorClicked: () -> Unit
+    onPageIndicatorClicked: () -> Unit,
 ) {
     val isFollower = !isLocalViewingOnly && !isLeader
 
@@ -140,22 +141,40 @@ private fun PdfViewerControls(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     when {
                         isLocalViewingOnly -> {
-                            Button(onClick = onStartLeadingClicked, colors = transparentButtonColors) { Text(stringResource(R.string.button_start_leading)) }
-                            Button(onClick = onFindSessionClicked, colors = transparentButtonColors) { Text(stringResource(R.string.button_find_session)) }
+                            Button(
+                                onClick = onStartLeadingClicked,
+                                colors = transparentButtonColors
+                            ) { Text(stringResource(R.string.button_start_leading)) }
+                            Button(
+                                onClick = onFindSessionClicked,
+                                colors = transparentButtonColors
+                            ) { Text(stringResource(R.string.button_find_session)) }
                         }
+
                         isLeader -> {
-                            Button(onClick = onStopLeadingClicked, colors = transparentButtonColors) { Text(stringResource(R.string.button_stop_leading)) }
+                            Button(
+                                onClick = onStopLeadingClicked,
+                                colors = transparentButtonColors
+                            ) { Text(stringResource(R.string.button_stop_leading)) }
                         }
+
                         else -> {
-                            Button(onClick = onLeaveSessionClicked, colors = transparentButtonColors) { Text(stringResource(R.string.button_leave_session)) }
+                            Button(
+                                onClick = onLeaveSessionClicked,
+                                colors = transparentButtonColors
+                            ) { Text(stringResource(R.string.button_leave_session)) }
                         }
                     }
-                    Button(onClick = onLoadDifferentPdfClicked, colors = transparentButtonColors) { Text(stringResource(R.string.button_load_new_pdf)) }
+                    Button(
+                        onClick = onLoadDifferentPdfClicked,
+                        colors = transparentButtonColors
+                    ) { Text(stringResource(R.string.button_load_new_pdf)) }
                 }
             }
 
             IconButton(
                 onClick = onTurnPageNext,
+                enabled = isNextPageAvailable,
                 modifier = Modifier
                     .background(Color.Black.copy(alpha = permanentControlAlpha), CircleShape)
                     .alpha(permanentControlAlpha)
@@ -217,20 +236,42 @@ fun PdfViewerScreen(
     onLoadDifferentPdfClicked: () -> Unit,
 ) {
     val context = LocalContext.current
-    val renderer = remember(pdfUri) { PdfPageRenderer(context, pdfUri) }
-    DisposableEffect(renderer) {
-        onDispose {
-            renderer.close()
-        }
-    }
-
+    var renderer by remember { mutableStateOf<PdfPageRenderer?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var isLoading by remember { mutableStateOf(false) }
+
+    var isLoading by remember { mutableStateOf(true) }
+
     var pdfContainerSize by remember { mutableStateOf<IntSize?>(null) }
     var controlsVisible by remember { mutableStateOf(true) }
 
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
+
+    // This effect will safely create the renderer on a background thread.
+    LaunchedEffect(pdfUri) {
+        // Reset state for the new URI
+        isLoading = true
+        renderer = null
+        error = null
+        bitmap = null
+
+        val result = PdfPageRenderer.create(context, pdfUri)
+        result.onSuccess { createdRenderer ->
+            renderer = createdRenderer
+        }.onFailure {
+            error = "Failed to load PDF file."
+        }
+
+        isLoading = false
+    }
+
+    // This effect ensures the renderer is closed when the screen is disposed.
+    DisposableEffect(pdfUri) {
+        onDispose {
+            renderer?.close()
+        }
+    }
 
     val currentBookPage by rememberUpdatedState(bookPage)
     val currentOnTurnPage by rememberUpdatedState(onTurnPage)
@@ -242,6 +283,10 @@ fun PdfViewerScreen(
         currentDeviceArrangement.indexOfFirst { it.isThisDevice }.takeIf { it != -1 } ?: 0
     }
 
+    val totalDevices = currentDeviceArrangement.size.coerceAtLeast(1)
+    val isNextPageAvailable = renderer?.let {
+        (currentBookPage + totalDevices) < it.pageCount
+    } ?: false
     val actualPageIndex = currentBookPage + thisDeviceIndex
 
     val viewConfiguration = LocalViewConfiguration.current
@@ -257,17 +302,19 @@ fun PdfViewerScreen(
         }
     }
 
-    LaunchedEffect(renderer, actualPageIndex, pdfContainerSize) {
-        pdfContainerSize?.let { validSize ->
-            if (actualPageIndex >= 0 && actualPageIndex < renderer.pageCount) {
-                isLoading = true
-                val renderSize = with(density) {
-                    Size(validSize.width.toFloat(), validSize.height.toFloat())
+    LaunchedEffect(renderer, actualPageIndex, pdfContainerSize, isLoading) {
+        if (!isLoading) {
+            renderer?.let { validRenderer ->
+                pdfContainerSize?.let { validSize ->
+                    if (actualPageIndex >= 0 && actualPageIndex < validRenderer.pageCount) {
+                        val renderSize = with(density) {
+                            Size(validSize.width.toFloat(), validSize.height.toFloat())
+                        }
+                        bitmap = validRenderer.renderPage(actualPageIndex, renderSize)
+                    } else {
+                        bitmap = null
+                    }
                 }
-                bitmap = renderer.renderPage(actualPageIndex, renderSize)
-                isLoading = false
-            } else {
-                bitmap = null
             }
         }
     }
@@ -281,6 +328,8 @@ fun PdfViewerScreen(
     }
 
     fun turnPageNext() {
+        if (!isNextPageAvailable) return
+
         currentOnTurnPage(PageTurnDirection.NEXT)
         scale = 1f
         offset = Offset.Zero
@@ -333,7 +382,15 @@ fun PdfViewerScreen(
                                 horizontalSwipeLock = true
                                 controlsVisible = false
                                 if (pan.x < 0) {
-                                    turnPageNext()
+                                    val canTurnNext = renderer?.let {
+                                        (currentBookPage + currentDeviceArrangement.size.coerceAtLeast(
+                                            1
+                                        )) < it.pageCount
+                                    } ?: false
+
+                                    if (canTurnNext) {
+                                        turnPageNext()
+                                    }
                                 } else {
                                     turnPagePrevious()
                                 }
@@ -348,29 +405,41 @@ fun PdfViewerScreen(
                 }
             }
     ) {
-        if (isLoading) {
-            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-        }
+        when {
+            isLoading -> {
+                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+            }
 
-        if (bitmap != null) {
-            Image(
-                bitmap = bitmap!!.asImageBitmap(),
-                contentDescription = "PDF Page ${actualPageIndex + 1}",
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer(
-                        scaleX = scale,
-                        scaleY = scale,
-                        translationX = offset.x,
-                        translationY = offset.y
-                    )
-            )
-        } else if (!isLoading) {
-            Text(
-                stringResource(R.string.end_of_document),
-                modifier = Modifier.align(Alignment.Center),
-                color = Color.White
-            )
+            error != null -> {
+                Text(
+                    error!!,
+                    modifier = Modifier.align(Alignment.Center),
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+
+            bitmap != null -> {
+                Image(
+                    bitmap = bitmap!!.asImageBitmap(),
+                    contentDescription = "PDF Page ${actualPageIndex + 1}",
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer(
+                            scaleX = scale,
+                            scaleY = scale,
+                            translationX = offset.x,
+                            translationY = offset.y
+                        )
+                )
+            }
+
+            else -> {
+                Text(
+                    stringResource(R.string.end_of_document),
+                    modifier = Modifier.align(Alignment.Center),
+                    color = Color.White
+                )
+            }
         }
 
         Column(
@@ -383,8 +452,13 @@ fun PdfViewerScreen(
                 isLocalViewingOnly = isLocalViewingOnly,
                 isLeader = isLeader,
                 statusText = statusText,
-                pageStatus = stringResource(R.string.status_bar_page_indicator, actualPageIndex + 1, renderer.pageCount),
+                pageStatus = stringResource(
+                    R.string.status_bar_page_indicator,
+                    actualPageIndex + 1,
+                    renderer?.pageCount ?: 0
+                ),
                 onTurnPagePrevious = ::turnPagePrevious,
+                isNextPageAvailable = isNextPageAvailable,
                 onTurnPageNext = ::turnPageNext,
                 onStartLeadingClicked = onStartLeadingClicked,
                 onFindSessionClicked = onFindSessionClicked,
@@ -397,7 +471,7 @@ fun PdfViewerScreen(
 
         if (showPageDialog) {
             GoToPageDialog(
-                totalPages = renderer.pageCount,
+                totalPages = renderer?.pageCount ?: 0,
                 onDismiss = { showPageDialog = false },
                 onConfirm = { page ->
                     onGoToPage(page - 1)
@@ -425,7 +499,14 @@ private fun GoToPageDialog(
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it.filter { c -> c.isDigit() } },
-                    label = { Text(stringResource(R.string.dialog_label_page_number, totalPages)) },
+                    label = {
+                        Text(
+                            stringResource(
+                                R.string.dialog_label_page_number,
+                                totalPages
+                            )
+                        )
+                    },
                     isError = isError,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true

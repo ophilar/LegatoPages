@@ -23,7 +23,8 @@
         android:roundIcon="@mipmap/ic_legato_pages_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.LegatoPages"
-        tools:targetApi="33">
+        android:enableOnBackInvokedCallback="true"
+        tools:targetApi="36">
         <activity
             android:name="MainActivity"
             android:exported="true"

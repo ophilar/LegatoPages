@@ -15,6 +15,7 @@ gson = "2.13.1"
 materialIconsExtended = "1.7.8"
 ui = "1.8.3"
 runtime = "1.8.3"
+testManifest = "1.8.3"
 
 [libraries]
 accompanist-permissions = { module = "com.google.accompanist:accompanist-permissions", version.ref = "accompanistPermissions" }
@@ -33,7 +34,7 @@ ui = { module = "androidx.compose.ui:ui" }
 ui-graphics = { module = "androidx.compose.ui:ui-graphics" }
 ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4" }
 ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest" }
+ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest", version.ref = "testManifest" }
 ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
 androidx-compose-material-icons-extended = { module = "androidx.compose.material:material-icons-extended", version.ref = "materialIconsExtended" }
 androidx-ui = { group = "androidx.compose.ui", name = "ui", version.ref = "ui" }
