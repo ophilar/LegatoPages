@@ -4,9 +4,14 @@
 /.idea/caches
 /.idea/libraries
 /.idea/modules.xml
+/.idea/appInsightsSettings.xml
+/.idea/compiler.xml
+/.idea/deploymentTargetSelector.xml
+/.idea/misc.xml
 /.idea/workspace.xml
 /.idea/navEditor.xml
 /.idea/assetWizardSettings.xml
+/.idea/deviceManager.xml
 .DS_Store
 /build
 /captures
